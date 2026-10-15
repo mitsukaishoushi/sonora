@@ -130,7 +130,6 @@ impl Render for MiniPlayer {
                         .right(theme.metrics.pad)
                         .rounded(theme.radius)
                         .bg(theme.background.opacity(0.78))
-                        .occlude()
                         .child(
                             Button::new("mini-player-restore")
                                 .ghost()
@@ -161,7 +160,6 @@ impl Render for MiniPlayer {
                                 .p(theme.metrics.pad / 2.)
                                 .rounded(theme.metrics.control)
                                 .bg(theme.background.opacity(0.78))
-                                .occlude()
                                 .child(previous(&self.playback, false, cx))
                                 .child(toggle(&self.playback, true, false, cx))
                                 .child(next(&self.playback, &self.queue, false, cx)),
