@@ -6,7 +6,7 @@ use gpui::{
 };
 use input::{CloseWindow, ToggleMiniPlayer, WORKSPACE_CONTEXT};
 use state::{Playback, Queue, Sonora};
-use ui::{ActiveTheme as _, Artwork, Button, Dismiss, Motion, Text};
+use ui::{ActiveTheme as _, Artwork, Button, Dismiss, Motion};
 
 use crate::shared::transport::{next, previous, toggle};
 
@@ -91,7 +91,6 @@ impl Render for MiniPlayer {
         let edge = window.viewport_size().width;
         let track = self.playback.read(cx).track();
         let cover = track.and_then(|track| track.cover.clone());
-        let title = track.map(|track| track.name.clone());
         let font = crate::root::ui_font(Sonora::global(cx).settings.read(cx).font());
 
         div()
@@ -130,7 +129,8 @@ impl Render for MiniPlayer {
                         .top(theme.metrics.pad)
                         .right(theme.metrics.pad)
                         .rounded(theme.radius)
-                        .bg(theme.background.opacity(0.9))
+                        .bg(theme.background.opacity(0.78))
+                        .occlude()
                         .child(
                             Button::new("mini-player-restore")
                                 .ghost()
@@ -148,31 +148,20 @@ impl Render for MiniPlayer {
                 .child(
                     div()
                         .absolute()
-                        .bottom_0()
+                        .bottom(theme.metrics.pad)
                         .left_0()
                         .w_full()
-                        .p(theme.metrics.pad)
                         .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap_1()
-                        .bg(theme.background.opacity(0.9))
-                        .rounded_b(theme.radius)
-                        .when_some(title, |this, title| {
-                            this.child(
-                                div()
-                                    .w_full()
-                                    .text_center()
-                                    .text_size(theme.text(Text::Small))
-                                    .truncate()
-                                    .child(title),
-                            )
-                        })
+                        .justify_center()
                         .child(
                             div()
                                 .flex()
                                 .items_center()
-                                .gap_2()
+                                .gap_1()
+                                .p(theme.metrics.pad / 2.)
+                                .rounded(theme.metrics.control)
+                                .bg(theme.background.opacity(0.78))
+                                .occlude()
                                 .child(previous(&self.playback, false, cx))
                                 .child(toggle(&self.playback, true, false, cx))
                                 .child(next(&self.playback, &self.queue, false, cx)),
