@@ -62,7 +62,7 @@ impl MiniPlayer {
                     cx.observe(&queue, |_, _, cx| cx.notify()).detach();
                     cx.observe(&settings, |_, _, cx| cx.notify()).detach();
                     let focus = cx.focus_handle();
-                    window.focus(&focus);
+                    window.focus(&focus, cx);
                     Self {
                         playback,
                         queue,

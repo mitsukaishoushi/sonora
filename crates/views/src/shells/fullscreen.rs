@@ -848,6 +848,16 @@ impl FullscreenView {
                             "queue-title",
                             Some(SideTab::Queue),
                         ),
+                        Button::new("fullscreen-mini-player")
+                            .ghost()
+                            .when(frosted, Button::frosted)
+                            .small()
+                            .rounded(theme.radius)
+                            .icon("icons/external-link.svg")
+                            .tooltip_above("player-mini")
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(ToggleMiniPlayer), cx)
+                            }),
                     ]),
             )
     }
@@ -1013,24 +1023,13 @@ impl FullscreenView {
             .right_5()
             .h(snapped(theme.metrics.player_bar, window))
             .flex()
-            .items_center()
-            .gap_2()
+            .flex_col()
+            .justify_center()
             .opacity(1. - idle)
             .on_hover(cx.listener(|this, hovering: &bool, _, cx| {
                 this.over_leave = *hovering;
                 cx.notify();
             }))
-            .child(
-                Button::new("fullscreen-mini-player")
-                    .ghost()
-                    .when(frosted, Button::frosted)
-                    .small()
-                    .icon("icons/external-link.svg")
-                    .tooltip_above("player-mini")
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(ToggleMiniPlayer), cx)
-                    }),
-            )
             .child(
                 Button::new("leave-fullscreen")
                     .ghost()
