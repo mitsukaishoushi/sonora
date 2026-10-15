@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Open an always-on-top album-cover mini player from Now Playing or with Ctrl+Shift+M.
+  Drag the cover to move it, hover for playback controls, and press Escape to return to Sonora.
+
 ## [0.43.0] - 2026-10-13
 
 ### Added

@@ -1,0 +1,65 @@
+name: Mini player - Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [mini-player]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mini-player-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mini-player-windows
+          cache-on-failure: true
+
+      - name: Format source
+        run: cargo fmt --all
+
+      - name: Check workspace
+        run: cargo check --workspace --locked
+
+      - name: Test workspace
+        run: cargo test --workspace --locked
+
+      - name: Check lints
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Build portable Windows app
+        run: cargo build --release --locked --package sonora
+
+      - name: Package app and licenses
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item -LiteralPath target/release/sonora.exe -Destination dist/Sonora-MiniPlayer.exe
+          Copy-Item -LiteralPath COPYING -Destination dist/LICENSE
+          Copy-Item -LiteralPath THIRD-PARTY.md -Destination dist/THIRD-PARTY.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sonora-MiniPlayer-Windows-x64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

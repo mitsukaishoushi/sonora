@@ -3,7 +3,7 @@ use gpui::{App, Font, FontFallbacks, SharedString, StyleRefinement, font, prelud
 use gpui::{Window, div};
 use input::{
     CloseWindow, MinimizeWindow, NavigateBack, NavigateForward, OpenFilter, OpenSearch,
-    OpenSettings, ToggleFullscreen, ToggleLyrics, ToggleQueue, ToggleWindowFullscreen, ZoomWindow,
+    OpenSettings, ToggleFullscreen, ToggleLyrics, ToggleMiniPlayer, ToggleQueue, ToggleWindowFullscreen, ZoomWindow,
 };
 use router::{Destination, NavigationEvent, Screen, SettingsTab, back, forward, navigate};
 use state::{
@@ -16,6 +16,7 @@ use ui::WindowFrame;
 use ui::{ActiveTheme as _, Dismiss, Entrance, Look, Stillness, Theme, ThemeKind, clear_listing};
 
 use crate::chrome::{TitleBar, TitleBarEvent, TitleBarOptions, Toolbar, Tooled};
+use crate::mini_player::MiniPlayer;
 use crate::screens::search::SearchView;
 use crate::screens::settings::SettingsHeader;
 use crate::shared::ambient::{self, Ambient};
@@ -67,6 +68,7 @@ enum Focus {
 }
 
 pub struct Root {
+    mini_player: Option<gpui::WindowHandle<MiniPlayer>>,
     session: Entity<Session>,
     playback: Entity<Playback>,
     io: Io,
@@ -112,6 +114,9 @@ impl Root {
     ) -> Self {
         cx.observe(&session, |this, session, cx| {
             if matches!(session.read(cx).state(), SessionState::SignedOut) {
+                if let Some(mini) = this.mini_player.take() {
+                    mini.update(cx, |_, window, _| window.remove_window()).ok();
+                }
                 this.navigation_transition = None;
                 this.shell_entrance = None;
                 this.shells
@@ -274,7 +279,15 @@ impl Root {
 
         let adaptive = cx.new(|cx| Adaptive::new(playback.clone(), cx));
 
+        cx.on_release(|this, cx| {
+            if let Some(mini) = this.mini_player.take() {
+                mini.update(cx, |_, window, _| window.remove_window()).ok();
+            }
+        })
+        .detach();
+
         let mut root = Self {
+            mini_player: None,
             session,
             playback,
             io,
@@ -473,6 +486,19 @@ impl Root {
         match self.view {
             RootView::Workspace => navigate(Destination::Fullscreen, cx),
             RootView::Fullscreen => back(cx),
+        }
+    }
+
+    fn toggle_mini_player(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(mini) = self.mini_player.take()
+            && mini.update(cx, |_, window, _| window.remove_window()).is_ok()
+        {
+            window.activate_window();
+            return;
+        }
+        self.mini_player = MiniPlayer::open(window, cx);
+        if self.mini_player.is_some() {
+            window.minimize_window();
         }
     }
 
@@ -720,7 +746,7 @@ const SCRIPTS: [&str; 18] = [
     "Segoe UI Emoji",
 ];
 
-fn ui_font(chosen: &str) -> Font {
+pub(crate) fn ui_font(chosen: &str) -> Font {
     match chosen == SYSTEM_FONT {
         true => Font {
             fallbacks: Some(scripts(false).clone()),
@@ -950,6 +976,7 @@ impl Render for Root {
             .on_action(cx.listener(|this, _: &OpenSearch, _, cx| this.open_search(cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, _, cx| this.open_settings(cx)))
             .on_action(cx.listener(|this, _: &ToggleFullscreen, _, cx| this.toggle_fullscreen(cx)))
+            .on_action(cx.listener(|this, _: &ToggleMiniPlayer, window, cx| this.toggle_mini_player(window, cx)))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .on_action(|_: &MinimizeWindow, window, _| window.minimize_window())
             .on_action(|_: &ZoomWindow, window, _| window.zoom_window())

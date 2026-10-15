@@ -10,7 +10,7 @@ use gpui::{
 };
 use gpui::{Window, canvas, deferred, div, phi, px, relative};
 use i18n::t;
-use input::{ToggleFullscreen, ToggleWindowFullscreen, WORKSPACE_CONTEXT};
+use input::{ToggleFullscreen, ToggleMiniPlayer, ToggleWindowFullscreen, WORKSPACE_CONTEXT};
 use router::{Destination, navigate};
 use state::{AppSettings, Cover, FullscreenControlsAutohide, Playback, Queue, SideTab, Sonora};
 use ui::{
@@ -1013,13 +1013,24 @@ impl FullscreenView {
             .right_5()
             .h(snapped(theme.metrics.player_bar, window))
             .flex()
-            .flex_col()
-            .justify_center()
+            .items_center()
+            .gap_2()
             .opacity(1. - idle)
             .on_hover(cx.listener(|this, hovering: &bool, _, cx| {
                 this.over_leave = *hovering;
                 cx.notify();
             }))
+            .child(
+                Button::new("fullscreen-mini-player")
+                    .ghost()
+                    .when(frosted, Button::frosted)
+                    .small()
+                    .icon("icons/external-link.svg")
+                    .tooltip_above("player-mini")
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(ToggleMiniPlayer), cx)
+                    }),
+            )
             .child(
                 Button::new("leave-fullscreen")
                     .ghost()

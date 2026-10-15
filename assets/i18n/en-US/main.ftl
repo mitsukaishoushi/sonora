@@ -906,3 +906,5 @@ toast-tray-unavailable = There is no system tray to put the icon in
 
 # power
 wake-reason = Music is playing
+player-mini = Open mini player (Ctrl+Shift+M)
+player-mini-restore = Return to Sonora (Esc)

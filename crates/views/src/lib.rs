@@ -1,4 +1,5 @@
 mod chrome;
+mod mini_player;
 mod root;
 mod screens;
 mod shared;
