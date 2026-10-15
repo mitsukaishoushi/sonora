@@ -120,6 +120,7 @@ impl Render for MiniPlayer {
                 Artwork::new(cover)
                     .size(edge)
                     .corner_radius(theme.radius)
+                    .window_control_area(gpui::WindowControlArea::Drag)
                     .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move()),
             )
             .when(self.hovered, |this| {

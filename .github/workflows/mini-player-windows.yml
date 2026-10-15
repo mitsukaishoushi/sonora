@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mini-player-windows-${{ github.ref }}
+  group: mini-player-windows-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 env:
