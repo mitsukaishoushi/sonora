@@ -16,7 +16,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  windows:
+  checks:
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
@@ -32,6 +32,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: mini-player-windows
+          shared-key: windows
           cache-on-failure: true
 
       - name: Format source
@@ -45,6 +46,24 @@ jobs:
 
       - name: Check lints
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mini-player-windows
+          shared-key: windows
+          cache-on-failure: true
 
       - name: Build portable Windows app
         run: cargo build --release --locked --package sonora
