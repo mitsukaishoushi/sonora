@@ -3,9 +3,10 @@
 
 use gpui::{Bounds, Pixels, Window, px};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, HMENU, HWND_NOTOPMOST,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetClientRect, GetCursorPos, GetWindowRect, HMENU, HWND_NOTOPMOST,
     HWND_TOPMOST, IsWindow, MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, MENU_ITEM_FLAGS,
     PostMessageW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
     SetWindowPos, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
@@ -60,7 +61,7 @@ pub(super) fn handle(window: &Window) -> Option<isize> {
     }
 }
 
-/// Applies device-pixel screen coordinates and only the requested z-order change.
+/// Applies client-area bounds, accounting for the invisible Windows frame on every move.
 pub(super) fn apply(owner: isize, bounds: Option<Bounds<Pixels>>, scale: f32, on_top: Option<bool>) {
     let hwnd = HWND(owner as *mut _);
     // A queued request may outlive a window closed in the meantime.
@@ -72,17 +73,39 @@ pub(super) fn apply(owner: isize, bounds: Option<Bounds<Pixels>>, scale: f32, on
         None => { flags |= SWP_NOZORDER; None }
     };
     let (x, y, width, height) = match bounds {
-        Some(bounds) => (
-            (bounds.origin.x / px(1.) * scale).round() as i32,
-            (bounds.origin.y / px(1.) * scale).round() as i32,
-            (bounds.size.width / px(1.) * scale).round() as i32,
-            (bounds.size.height / px(1.) * scale).round() as i32,
-        ),
+        Some(bounds) => match outer_frame(hwnd, bounds, scale) {
+            Ok(frame) => frame,
+            Err(error) => {
+                log::warn!("mini player: cannot measure window frame: {error}");
+                return;
+            }
+        },
         None => { flags |= SWP_NOMOVE | SWP_NOSIZE; (0, 0, 0, 0) }
     };
     if let Err(error) = unsafe { SetWindowPos(hwnd, after, x, y, width, height, flags) } {
         log::warn!("mini player: cannot update window: {error}");
     }
+}
+
+/// SetWindowPos sizes the outer frame; artwork and saved coordinates describe its client area.
+/// Measuring both rectangles also handles asymmetric borders and the current monitor's DPI.
+fn outer_frame(hwnd: HWND, bounds: Bounds<Pixels>, scale: f32) -> windows::core::Result<(i32, i32, i32, i32)> {
+    let mut outer = RECT::default();
+    let mut client = RECT::default();
+    let mut origin = POINT::default();
+    unsafe {
+        GetWindowRect(hwnd, &mut outer)?;
+        GetClientRect(hwnd, &mut client)?;
+        ClientToScreen(hwnd, &mut origin).ok()?;
+    }
+    let border_width = (outer.right - outer.left) - (client.right - client.left);
+    let border_height = (outer.bottom - outer.top) - (client.bottom - client.top);
+    Ok((
+        (bounds.origin.x / px(1.) * scale).round() as i32 - (origin.x - outer.left),
+        (bounds.origin.y / px(1.) * scale).round() as i32 - (origin.y - outer.top),
+        (bounds.size.width / px(1.) * scale).round() as i32 + border_width,
+        (bounds.size.height / px(1.) * scale).round() as i32 + border_height,
+    ))
 }
 
 /// Native submenus can extend beyond even the smallest artwork window and stay on screen.

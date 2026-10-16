@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the mini player's artwork square and edge-to-edge after choosing a position or cover size on Windows.
+
 ### Added
 
 - Right-click the mini player to align it in six screen positions, choose a cover size, or toggle always on top.

@@ -1790,7 +1790,16 @@ impl AppSettings {
 
     /// Debounces companion-window moves and size changes using the existing runtime store.
     pub fn keep_mini_player_frame(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let frame = Frame::of(window);
+        // The companion has no title bar. Use its actual client bounds rather than the
+        // normal-window placement calculation, which divides frame insets symmetrically.
+        let bounds = window.bounds();
+        let frame = Frame {
+            x: bounds.origin.x / px(1.),
+            y: bounds.origin.y / px(1.),
+            width: bounds.size.width / px(1.),
+            height: bounds.size.height / px(1.),
+            maximized: false,
+        };
         if !frame.sane() || self.state.mini_player_window == Some(frame) {
             return;
         }

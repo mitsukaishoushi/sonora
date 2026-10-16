@@ -111,7 +111,7 @@ impl MiniPlayer {
                 ..Default::default()
             },
             move |window, cx| {
-                apply_window(window, None, Some(on_top), cx);
+                apply_window(window, Some(bounds), Some(on_top), cx);
                 window.on_window_should_close(cx, move |_, cx| {
                     restore(parent, cx);
                     true
@@ -260,6 +260,9 @@ impl Render for MiniPlayer {
             .child(
                 Artwork::new(cover)
                     .size(edge)
+                    .absolute()
+                    .inset_0()
+                    .size_full()
                     .corner_radius(theme.radius)
                     .window_control_area(gpui::WindowControlArea::Drag)
                     .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
