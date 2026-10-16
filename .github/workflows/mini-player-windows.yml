@@ -75,6 +75,8 @@ jobs:
           Copy-Item -LiteralPath target/release/sonora.exe -Destination dist/Sonora-MiniPlayer.exe
           Copy-Item -LiteralPath COPYING -Destination dist/LICENSE
           Copy-Item -LiteralPath THIRD-PARTY.md -Destination dist/THIRD-PARTY.md
+          Copy-Item -LiteralPath MINI-PLAYER.txt -Destination 'dist/Read me.txt'
+          Set-Content -LiteralPath dist/SOURCE.txt -Value "Matching source code: https://github.com/$env:GITHUB_REPOSITORY/tree/$env:GITHUB_SHA"
 
       - uses: actions/upload-artifact@v4
         with:

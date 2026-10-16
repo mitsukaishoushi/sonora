@@ -1,0 +1,29 @@
+SONORA MINI PLAYER
+
+Extract this ZIP, fully quit any running Sonora (including its tray icon),
+and open Sonora-MiniPlayer.exe. This portable copy uses your existing Sonora
+settings and library; it does not replace the installed app.
+
+Open the mini player with Ctrl+Shift+M or the mini-player icon in Now Playing.
+Drag the album cover freely. Hover for playback controls. Press Escape or
+the return button to return to the full app.
+
+RIGHT-CLICK THE COVER
+Position: Top left, Top middle, Top right, Bottom left, Bottom middle,
+or Bottom right. Alignment uses the current monitor and leaves a gap from
+the screen edges and taskbar. You can drag away from any position.
+
+Cover size: Small, Medium, or Large.
+Always on top: Check to keep the cover above other apps; uncheck for normal layering.
+
+Position, size, and always-on-top preference are saved automatically.
+Scroll up over the cover to increase volume, or down to decrease it.
+
+SHARING
+Keep LICENSE, THIRD-PARTY.md, and SOURCE.txt with the app when sharing.
+SOURCE.txt identifies the exact matching source code for this custom build.
+Your friend uses their own music accounts and files. Online music services
+still require an internet connection and their usual account/subscription.
+
+This is a modified Sonora 0.43.0 build. Official Sonora updates do not
+automatically contain these custom mini-player changes.

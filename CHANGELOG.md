@@ -9,6 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Right-click the mini player to align it in six screen positions, choose a cover size, or toggle always on top.
+  Position and size are remembered, and scrolling over the cover adjusts volume.
 - Open an always-on-top album-cover mini player from Now Playing or with Ctrl+Shift+M.
   Drag the cover to move it, hover for playback controls, and press Escape to return to Sonora.
 

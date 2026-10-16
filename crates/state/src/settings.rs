@@ -515,6 +515,8 @@ struct StateValues {
     sidebar_pin_reversed: bool,
     resume: Option<Resume>,
     window: Option<Frame>,
+    mini_player_window: Option<Frame>,
+    mini_player_on_top: bool,
     system_theme: String,
 }
 
@@ -543,6 +545,8 @@ impl Default for StateValues {
             sidebar_pin_reversed: false,
             resume: None,
             window: None,
+            mini_player_window: None,
+            mini_player_on_top: true,
             system_theme: ThemeKind::Dark.id().to_owned(),
         }
     }
@@ -1763,6 +1767,35 @@ impl AppSettings {
     pub fn set_transparency(&mut self, transparency: f32, cx: &mut Context<Self>) {
         self.values.appearance.transparency = transparency.clamp(0., ui::MAX_TRANSPARENCY);
         self.schedule_save(cx);
+    }
+
+    /// The companion window has its own frame so it never replaces the main window's frame.
+    pub fn mini_player_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.state.mini_player_window.filter(|frame| frame.sane()).map(|frame| {
+            Bounds {
+                origin: point(px(frame.x), px(frame.y)),
+                size: size(px(frame.width), px(frame.height)),
+            }
+        })
+    }
+
+    pub fn mini_player_on_top(&self) -> bool {
+        self.state.mini_player_on_top
+    }
+
+    pub fn set_mini_player_on_top(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.mini_player_on_top = enabled;
+        self.schedule_state_save(cx);
+    }
+
+    /// Debounces companion-window moves and size changes using the existing runtime store.
+    pub fn keep_mini_player_frame(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let frame = Frame::of(window);
+        if !frame.sane() || self.state.mini_player_window == Some(frame) {
+            return;
+        }
+        self.state.mini_player_window = Some(frame);
+        self.save_state_quietly(cx);
     }
 
     /// Saves the window frame now and on every move or resize.
