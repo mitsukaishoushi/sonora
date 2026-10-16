@@ -41,7 +41,7 @@ impl Menu {
     fn submenu(&self, label: &str, mut child: Self) -> windows::core::Result<()> {
         let text: Vec<u16> = label.encode_utf16().chain(Some(0)).collect();
         unsafe { AppendMenuW(self.handle(), MF_POPUP, child.handle().0 as usize, PCWSTR(text.as_ptr()))?; }
-        child.0.take();
+        child.0 = None;
         Ok(())
     }
 }

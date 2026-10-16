@@ -92,7 +92,7 @@ impl MiniPlayer {
             .unwrap_or(cx.theme().metrics.cover * COVER_SCALE);
         let mut bounds = saved.unwrap_or_else(|| Bounds::centered(display_id, size(edge, edge), cx));
         if let Some(display) = display {
-            bounds = fitted(bounds, display.visible_bounds(), cx);
+            bounds = fitted(bounds, display.visible_bounds(), Pixels::ZERO, cx);
         }
         let on_top = settings.read(cx).mini_player_on_top();
         let parent = parent.window_handle();
@@ -191,8 +191,6 @@ impl MiniPlayer {
             let command = native::popup(owner, labels, on_top);
             this.update_in(cx, |this, window, cx| {
                 this.menu_open = false;
-                this.hovered = false;
-                this.hover_revision = this.hover_revision.wrapping_add(1);
                 this.command(command, window, cx);
                 cx.notify();
             }).ok();
@@ -223,7 +221,7 @@ impl MiniPlayer {
             }
             _ => return,
         };
-        apply_window(window, Some(fitted(next, work, cx)), None, cx);
+        apply_window(window, Some(fitted(next, work, cx.theme().metrics.inset, cx)), None, cx);
     }
 }
 
@@ -323,9 +321,9 @@ impl Render for MiniPlayer {
 }
 
 /// Keeps a square inside the usable screen, including after a monitor is removed.
-fn fitted(bounds: Bounds<Pixels>, work: Bounds<Pixels>, cx: &App) -> Bounds<Pixels> {
+fn fitted(bounds: Bounds<Pixels>, work: Bounds<Pixels>, gap: Pixels, cx: &App) -> Bounds<Pixels> {
     let theme = cx.theme();
-    let gap = theme.metrics.inset.min(work.size.width.min(work.size.height) / 4.);
+    let gap = gap.min(work.size.width.min(work.size.height) / 4.);
     let available = (work.size.width.min(work.size.height) - gap * 2.).max(PIXEL);
     let minimum = (theme.metrics.cover * COVER_SCALES[0]).min(available);
     let maximum = (theme.metrics.cover * COVER_SCALES[2]).min(available);
