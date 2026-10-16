@@ -111,7 +111,7 @@ fn popup_inner(owner: isize, labels: Labels, on_top: bool) -> windows::core::Res
         GetCursorPos(&mut cursor)?;
         let _ = SetForegroundWindow(hwnd);
         let command = TrackPopupMenu(root.handle(), TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
-            cursor.x, cursor.y, 0, hwnd, None).0 as u32;
+            cursor.x, cursor.y, None, hwnd, None).0 as u32;
         let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
         Ok(command)
     }
