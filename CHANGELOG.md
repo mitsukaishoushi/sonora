@@ -13,6 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Open a separate compact player with Ctrl+Shift+N or from the album-cover player's right-click menu.
+  The card includes track details, seeking, volume, and playback controls, with its own saved position and size.
 - Right-click the mini player to align it in six screen positions, choose a cover size, or toggle always on top.
   Position and size are remembered, and scrolling over the cover adjusts volume.
 - Open an always-on-top album-cover mini player from Now Playing or with Ctrl+Shift+M.

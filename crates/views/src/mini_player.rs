@@ -5,14 +5,14 @@ use gpui::{
     Window, WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions,
     div, size,
 };
-use input::{CloseWindow, ToggleMiniPlayer, WORKSPACE_CONTEXT};
+use input::{CloseWindow, OpenCompactPlayer, ToggleCompactPlayer, ToggleMiniPlayer, WORKSPACE_CONTEXT};
 use state::{AppSettings, Playback, Queue, Sonora};
 use ui::{ActiveTheme as _, Artwork, Button, Dismiss, Motion};
 
 use crate::shared::transport::{NOTCH, next, previous, toggle};
 
 #[cfg(target_os = "windows")]
-mod native;
+pub(crate) mod native;
 
 const COVER_SCALE: f32 = 2.3;
 const COVER_SCALES: [f32; 3] = [1.6, COVER_SCALE, 3.1];
@@ -184,6 +184,7 @@ impl MiniPlayer {
             size: t!("mini-size").to_string(),
             on_top: t!("mini-on-top").to_string(),
             restore: t!("player-mini-restore").to_string(),
+            alternative: Some(t!("compact-open").to_string()),
             positions, sizes,
         };
         self.menu_open = true;
@@ -202,6 +203,10 @@ impl MiniPlayer {
 
     #[cfg(target_os = "windows")]
     fn command(&mut self, command: u32, window: &mut Window, cx: &mut Context<Self>) {
+        if command == 23 {
+            self.open_compact(cx);
+            return;
+        }
         if command == 21 {
             let enabled = !self.settings.read(cx).mini_player_on_top();
             self.settings.update(cx, |settings, cx| settings.set_mini_player_on_top(enabled, cx));
@@ -222,6 +227,13 @@ impl MiniPlayer {
             _ => return,
         };
         apply_window(window, Some(fitted(next, work, cx.theme().metrics.inset, cx)), None, cx);
+    }
+
+    /// The second companion opens beside this one; its window and saved geometry are independent.
+    fn open_compact(&self, cx: &mut App) {
+        self.parent.update(cx, |_, window, cx| {
+            window.dispatch_action(Box::new(OpenCompactPlayer), cx);
+        }).ok();
     }
 }
 
@@ -256,6 +268,7 @@ impl Render for MiniPlayer {
             }))
             .on_action(cx.listener(|this, _: &Dismiss, window, cx| this.close(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleMiniPlayer, window, cx| this.close(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleCompactPlayer, _, cx| this.open_compact(cx)))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| this.close(window, cx)))
             .child(
                 Artwork::new(cover)

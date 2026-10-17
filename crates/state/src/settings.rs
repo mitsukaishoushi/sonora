@@ -517,6 +517,8 @@ struct StateValues {
     window: Option<Frame>,
     mini_player_window: Option<Frame>,
     mini_player_on_top: bool,
+    compact_player_window: Option<Frame>,
+    compact_player_on_top: bool,
     system_theme: String,
 }
 
@@ -547,6 +549,8 @@ impl Default for StateValues {
             window: None,
             mini_player_window: None,
             mini_player_on_top: true,
+            compact_player_window: None,
+            compact_player_on_top: true,
             system_theme: ThemeKind::Dark.id().to_owned(),
         }
     }
@@ -1804,6 +1808,39 @@ impl AppSettings {
             return;
         }
         self.state.mini_player_window = Some(frame);
+        self.save_state_quietly(cx);
+    }
+
+    /// The compact card has its own frame and preferences, separate from both other windows.
+    pub fn compact_player_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.state.compact_player_window.filter(|frame| frame.sane()).map(|frame| Bounds {
+            origin: point(px(frame.x), px(frame.y)),
+            size: size(px(frame.width), px(frame.height)),
+        })
+    }
+
+    pub fn compact_player_on_top(&self) -> bool {
+        self.state.compact_player_on_top
+    }
+
+    pub fn set_compact_player_on_top(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.compact_player_on_top = enabled;
+        self.schedule_state_save(cx);
+    }
+
+    pub fn keep_compact_player_frame(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let bounds = window.bounds();
+        let frame = Frame {
+            x: bounds.origin.x / px(1.),
+            y: bounds.origin.y / px(1.),
+            width: bounds.size.width / px(1.),
+            height: bounds.size.height / px(1.),
+            maximized: false,
+        };
+        if !frame.sane() || self.state.compact_player_window == Some(frame) {
+            return;
+        }
+        self.state.compact_player_window = Some(frame);
         self.save_state_quietly(cx);
     }
 

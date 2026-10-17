@@ -4,6 +4,7 @@ use gpui::{Window, div};
 use input::{
     CloseWindow, MinimizeWindow, NavigateBack, NavigateForward, OpenFilter, OpenSearch,
     OpenSettings, ToggleFullscreen, ToggleLyrics, ToggleMiniPlayer, ToggleQueue, ToggleWindowFullscreen, ZoomWindow,
+    OpenCompactPlayer, ToggleCompactPlayer,
 };
 use router::{Destination, NavigationEvent, Screen, SettingsTab, back, forward, navigate};
 use state::{
@@ -17,6 +18,7 @@ use ui::{ActiveTheme as _, Dismiss, Entrance, Look, Stillness, Theme, ThemeKind,
 
 use crate::chrome::{TitleBar, TitleBarEvent, TitleBarOptions, Toolbar, Tooled};
 use crate::mini_player::MiniPlayer;
+use crate::compact_player::CompactPlayer;
 use crate::screens::search::SearchView;
 use crate::screens::settings::SettingsHeader;
 use crate::shared::ambient::{self, Ambient};
@@ -69,6 +71,7 @@ enum Focus {
 
 pub struct Root {
     mini_player: Option<gpui::WindowHandle<MiniPlayer>>,
+    compact_player: Option<gpui::WindowHandle<CompactPlayer>>,
     session: Entity<Session>,
     playback: Entity<Playback>,
     io: Io,
@@ -114,6 +117,9 @@ impl Root {
     ) -> Self {
         cx.observe(&session, |this, session, cx| {
             if matches!(session.read(cx).state(), SessionState::SignedOut) {
+                if let Some(compact) = this.compact_player.take() {
+                    compact.update(cx, |_, window, _| window.remove_window()).ok();
+                }
                 if let Some(mini) = this.mini_player.take() {
                     mini.update(cx, |_, window, _| window.remove_window()).ok();
                 }
@@ -280,6 +286,9 @@ impl Root {
         let adaptive = cx.new(|cx| Adaptive::new(playback.clone(), cx));
 
         cx.on_release(|this, cx| {
+            if let Some(compact) = this.compact_player.take() {
+                compact.update(cx, |_, window, _| window.remove_window()).ok();
+            }
             if let Some(mini) = this.mini_player.take() {
                 mini.update(cx, |_, window, _| window.remove_window()).ok();
             }
@@ -287,6 +296,7 @@ impl Root {
         .detach();
 
         let mut root = Self {
+            compact_player: None,
             mini_player: None,
             session,
             playback,
@@ -500,6 +510,29 @@ impl Root {
         if self.mini_player.is_some() {
             window.minimize_window();
         }
+    }
+
+    /// Opens or focuses the separate card without replacing the artwork-only companion.
+    fn open_compact_player(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(compact) = self.compact_player
+            && compact.update(cx, |_, window, _| window.activate_window()).is_ok()
+        {
+            return;
+        }
+        self.compact_player = CompactPlayer::open(window, cx);
+        if self.compact_player.is_some() {
+            window.minimize_window();
+        }
+    }
+
+    fn toggle_compact_player(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(compact) = self.compact_player.take()
+            && compact.update(cx, |_, window, _| window.remove_window()).is_ok()
+        {
+            window.activate_window();
+            return;
+        }
+        self.open_compact_player(window, cx);
     }
 
     fn dismiss(&mut self, cx: &mut Context<Self>) {
@@ -977,6 +1010,8 @@ impl Render for Root {
             .on_action(cx.listener(|this, _: &OpenSettings, _, cx| this.open_settings(cx)))
             .on_action(cx.listener(|this, _: &ToggleFullscreen, _, cx| this.toggle_fullscreen(cx)))
             .on_action(cx.listener(|this, _: &ToggleMiniPlayer, window, cx| this.toggle_mini_player(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleCompactPlayer, window, cx| this.toggle_compact_player(window, cx)))
+            .on_action(cx.listener(|this, _: &OpenCompactPlayer, window, cx| this.open_compact_player(window, cx)))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .on_action(|_: &MinimizeWindow, window, _| window.minimize_window())
             .on_action(|_: &ZoomWindow, window, _| window.zoom_window())

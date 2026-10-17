@@ -19,6 +19,20 @@ Always on top: Check to keep the cover above other apps; uncheck for normal laye
 Position, size, and always-on-top preference are saved automatically.
 Scroll up over the cover to increase volume, or down to decrease it.
 
+SECOND MINI PLAYER
+Press Ctrl+Shift+N in Sonora to open a separate compact card, or choose
+Open compact player from the artwork-only player's right-click menu.
+The original Ctrl+Shift+M artwork player keeps its existing appearance and controls.
+Both players can be open at once. They share the same music playback.
+
+The compact card has small artwork, track and album details, a seek bar,
+elapsed and remaining time, mute/volume, previous/play/next, and player options.
+Its lyrics and queue buttons open the existing Sonora panels.
+Drag its artwork/title area to move it. Scroll over the card to adjust volume.
+Right-click the card or select its three-dot button for position, size, and
+always-on-top options. Its position, size, and topmost setting are saved separately.
+Escape or Ctrl+Shift+N closes the card and returns to Sonora.
+
 SHARING
 Keep LICENSE, THIRD-PARTY.md, and SOURCE.txt with the app when sharing.
 SOURCE.txt identifies the exact matching source code for this custom build.

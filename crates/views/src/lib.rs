@@ -1,5 +1,6 @@
 mod chrome;
 mod mini_player;
+mod compact_player;
 mod root;
 mod screens;
 mod shared;

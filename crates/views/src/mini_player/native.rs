@@ -14,11 +14,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::PCWSTR;
 
 /// Localized labels prepared before opening the menu.
-pub(super) struct Labels {
+pub(crate) struct Labels {
     pub position: String,
     pub size: String,
     pub on_top: String,
     pub restore: String,
+    pub alternative: Option<String>,
     pub positions: Vec<(u32, String, bool)>,
     pub sizes: Vec<(u32, String, bool)>,
 }
@@ -54,7 +55,7 @@ impl Drop for Menu {
 }
 
 /// Copies the OS handle without extending a GPUI borrow into a native message loop.
-pub(super) fn handle(window: &Window) -> Option<isize> {
+pub(crate) fn handle(window: &Window) -> Option<isize> {
     match HasWindowHandle::window_handle(window).ok()?.as_raw() {
         RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
         _ => None,
@@ -62,7 +63,7 @@ pub(super) fn handle(window: &Window) -> Option<isize> {
 }
 
 /// Applies client-area bounds, accounting for the invisible Windows frame on every move.
-pub(super) fn apply(owner: isize, bounds: Option<Bounds<Pixels>>, scale: f32, on_top: Option<bool>) {
+pub(crate) fn apply(owner: isize, bounds: Option<Bounds<Pixels>>, scale: f32, on_top: Option<bool>) {
     let hwnd = HWND(owner as *mut _);
     // A queued request may outlive a window closed in the meantime.
     if !unsafe { IsWindow(Some(hwnd)) }.as_bool() { return; }
@@ -109,7 +110,7 @@ fn outer_frame(hwnd: HWND, bounds: Bounds<Pixels>, scale: f32) -> windows::core:
 }
 
 /// Native submenus can extend beyond even the smallest artwork window and stay on screen.
-pub(super) fn popup(owner: isize, labels: Labels, on_top: bool) -> u32 {
+pub(crate) fn popup(owner: isize, labels: Labels, on_top: bool) -> u32 {
     match popup_inner(owner, labels, on_top) {
         Ok(command) => command,
         Err(error) => { log::warn!("mini player: cannot open menu: {error}"); 0 }
@@ -127,6 +128,9 @@ fn popup_inner(owner: isize, labels: Labels, on_top: bool) -> windows::core::Res
     for (id, label, checked) in labels.sizes { sizes.item(id, &label, checked)?; }
     root.submenu(&labels.size, sizes)?;
     root.item(21, &labels.on_top, on_top)?;
+    if let Some(alternative) = labels.alternative {
+        root.item(23, &alternative, false)?;
+    }
     unsafe { AppendMenuW(root.handle(), MF_SEPARATOR, 0, PCWSTR::null())?; }
     root.item(22, &labels.restore, false)?;
     let mut cursor = POINT::default();
