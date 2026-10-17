@@ -27,6 +27,8 @@ actions!(
         ToggleMiniPlayer,
         ToggleCompactPlayer,
         OpenCompactPlayer,
+        OpenPlayerLyrics,
+        OpenPlayerQueue,
         ToggleQueue,
         ToggleLyrics,
         CloseWindow,

@@ -4,7 +4,7 @@ use gpui::{Window, div};
 use input::{
     CloseWindow, MinimizeWindow, NavigateBack, NavigateForward, OpenFilter, OpenSearch,
     OpenSettings, ToggleFullscreen, ToggleLyrics, ToggleMiniPlayer, ToggleQueue, ToggleWindowFullscreen, ZoomWindow,
-    OpenCompactPlayer, ToggleCompactPlayer,
+    OpenCompactPlayer, OpenPlayerLyrics, OpenPlayerQueue, ToggleCompactPlayer,
 };
 use router::{Destination, NavigationEvent, Screen, SettingsTab, back, forward, navigate};
 use state::{
@@ -535,6 +535,19 @@ impl Root {
         self.open_compact_player(window, cx);
     }
 
+    /// The compact card's panel buttons reveal the requested existing panel in either shell.
+    fn reveal_player_panel(&self, tab: SideTab, cx: &mut Context<Self>) {
+        match self.view {
+            RootView::Fullscreen => self.shells.fullscreen.update(cx, |view, cx| view.reveal_panel(tab, cx)),
+            RootView::Workspace => {
+                let settings = Sonora::global(cx).settings.read(cx);
+                if !settings.sidebar_right_open() || settings.sidebar_right_tab() != tab {
+                    self.show_side(tab, cx);
+                }
+            }
+        }
+    }
+
     fn dismiss(&mut self, cx: &mut Context<Self>) {
         if matches!(self.view, RootView::Fullscreen) {
             back(cx);
@@ -1012,6 +1025,8 @@ impl Render for Root {
             .on_action(cx.listener(|this, _: &ToggleMiniPlayer, window, cx| this.toggle_mini_player(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleCompactPlayer, window, cx| this.toggle_compact_player(window, cx)))
             .on_action(cx.listener(|this, _: &OpenCompactPlayer, window, cx| this.open_compact_player(window, cx)))
+            .on_action(cx.listener(|this, _: &OpenPlayerLyrics, _, cx| this.reveal_player_panel(SideTab::Lyrics, cx)))
+            .on_action(cx.listener(|this, _: &OpenPlayerQueue, _, cx| this.reveal_player_panel(SideTab::Queue, cx)))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .on_action(|_: &MinimizeWindow, window, _| window.minimize_window())
             .on_action(|_: &ZoomWindow, window, _| window.zoom_window())

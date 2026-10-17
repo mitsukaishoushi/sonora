@@ -10,7 +10,7 @@ use gpui::{
     div, point, px, size,
 };
 use i18n::t;
-use input::{CloseWindow, ToggleCompactPlayer, ToggleLyrics, ToggleMiniPlayer, ToggleQueue, WORKSPACE_CONTEXT};
+use input::{CloseWindow, OpenPlayerLyrics, OpenPlayerQueue, ToggleCompactPlayer, ToggleMiniPlayer, WORKSPACE_CONTEXT};
 use state::{AppSettings, Playback, Queue, Sonora};
 use ui::{ActiveTheme as _, Artwork, Button, Dismiss, ExplicitBadge, Scrubber, ScrubberState, Text, clock, tabular};
 
@@ -130,8 +130,8 @@ impl CompactPlayer {
         self.parent.update(cx, |_, window, cx| {
             window.activate_window();
             let action: Box<dyn gpui::Action> = match lyrics {
-                true => Box::new(ToggleLyrics),
-                false => Box::new(ToggleQueue),
+                true => Box::new(OpenPlayerLyrics),
+                false => Box::new(OpenPlayerQueue),
             };
             window.dispatch_action(action, cx);
         }).ok();
@@ -264,7 +264,7 @@ impl Render for CompactPlayer {
                     .on_release(cx.listener(|this, _, _, cx| this.commit_seek(cx)))
             ))
             .child(div().w(clock_width).flex_none().text_right().whitespace_nowrap()
-                .child(t!("compact-remaining", time = clock(total.saturating_sub(elapsed)))));
+                .child(t!("compact-remaining", time = &clock(total.saturating_sub(elapsed)))));
 
         let controls = div().flex().items_center().justify_between().h(theme.metrics.control).flex_none()
             .child(div().flex().items_center()

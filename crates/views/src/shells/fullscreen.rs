@@ -174,6 +174,11 @@ impl FullscreenView {
         window.focus(&self.focus, cx);
     }
 
+    /// Reveals a panel requested by the separate compact player without toggling it closed.
+    pub(crate) fn reveal_panel(&mut self, tab: SideTab, cx: &mut Context<Self>) {
+        self.show(Some(tab), cx);
+    }
+
     fn show(&mut self, panel: Option<SideTab>, cx: &mut Context<Self>) {
         self.panel = panel;
         self.settings
