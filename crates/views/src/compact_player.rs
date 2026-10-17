@@ -238,6 +238,7 @@ impl Render for CompactPlayer {
         let font = crate::root::ui_font(self.settings.read(cx).font());
         let text = theme.text(Text::Small);
         let clock_width = text * match total.as_secs() >= 3600 { true => 5., false => 3.5 };
+        let remaining = clock(total.saturating_sub(elapsed));
 
         let header = div()
             .id("compact-drag-area")
@@ -264,7 +265,7 @@ impl Render for CompactPlayer {
                     .on_release(cx.listener(|this, _, _, cx| this.commit_seek(cx)))
             ))
             .child(div().w(clock_width).flex_none().text_right().whitespace_nowrap()
-                .child(t!("compact-remaining", time = &clock(total.saturating_sub(elapsed)))));
+                .child(t!("compact-remaining", time = &remaining)));
 
         let controls = div().flex().items_center().justify_between().h(theme.metrics.control).flex_none()
             .child(div().flex().items_center()
