@@ -305,6 +305,7 @@ struct Values {
     close_to_tray: bool,
     tray_icon: bool,
     stay_awake: bool,
+    controller_shortcuts: bool,
     language: String,
     #[serde(default = "system_font")]
     font: String,
@@ -468,6 +469,7 @@ impl Default for Values {
             close_to_tray: true,
             tray_icon: true,
             stay_awake: true,
+            controller_shortcuts: cfg!(target_os = "windows"),
             language: i18n::AUTO.to_owned(),
             font: system_font(),
             startup: DEFAULT_STARTUP.to_owned(),
@@ -888,6 +890,11 @@ impl AppSettings {
         self.values.stay_awake
     }
 
+    /// Whether controller button chords may change tracks while Sonora is in the background.
+    pub fn controller_shortcuts(&self) -> bool {
+        self.values.controller_shortcuts
+    }
+
     /// Every linked scrobbling account, keyed by its service slug.
     pub fn scrobbling(&self) -> &BTreeMap<String, Account> {
         &self.values.scrobbling
@@ -1302,6 +1309,11 @@ impl AppSettings {
 
     pub fn set_stay_awake(&mut self, stay_awake: bool, cx: &mut Context<Self>) {
         self.values.stay_awake = stay_awake;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_controller_shortcuts(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.values.controller_shortcuts = enabled;
         self.schedule_save(cx);
     }
 

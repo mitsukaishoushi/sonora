@@ -927,3 +927,6 @@ compact-lyrics = Open lyrics in Sonora
 compact-queue = Open queue in Sonora
 compact-track-detail = { $artist } — { $album }
 compact-remaining = -{ $time }
+
+settings-controller-shortcuts = Controller shortcuts
+settings-controller-shortcuts-detail = Next / previous: Xbox View + RB / LB or DualSense Create + R1 / L1.

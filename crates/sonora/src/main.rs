@@ -2,6 +2,8 @@
 
 mod actions;
 mod assets;
+#[cfg(windows)]
+mod controller;
 mod dock;
 mod http;
 mod logging;
@@ -171,6 +173,8 @@ fn main() {
             cx.set_quit_mode(QuitMode::Explicit);
         }
         actions::register(lingers, cx);
+        #[cfg(windows)]
+        controller::install(cx);
         memory::watch(cx);
 
         open_window(cx);

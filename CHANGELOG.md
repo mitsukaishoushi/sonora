@@ -13,6 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Skip tracks while gaming with Xbox View + RB/LB or DualSense Create + R1/L1 on Windows.
+  Controller shortcuts can be turned off in Settings, under Playback.
 - Open a separate compact player with Ctrl+Shift+N or from the album-cover player's right-click menu.
   The card includes track details, seeking, volume, and playback controls, with its own saved position and size.
 - Right-click the mini player to align it in six screen positions, choose a cover size, or toggle always on top.

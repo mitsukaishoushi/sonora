@@ -33,6 +33,16 @@ Right-click the card or select its three-dot button for position, size, and
 always-on-top options. Its position, size, and topmost setting are saved separately.
 Escape or Ctrl+Shift+N closes the card and returns to Sonora.
 
+CONTROLLER SHORTCUTS (WINDOWS)
+Xbox: hold View (the overlapping-squares button), then tap RB for next or LB for previous.
+DualSense: hold Create (left of the touchpad), then tap R1 for next or L1 for previous.
+Hold the modifier first, then tap a bumper. Holding a bumper does not repeat.
+Works while Sonora is minimized or in the tray. Both mini players keep their existing controls.
+Turn this off in Settings > Playback > Controller shortcuts.
+Sonora only reads controller input; the game still receives these buttons too.
+USB and Bluetooth DualSense reports and Xbox-compatible XInput controllers are supported.
+If another tool hides the physical DualSense, its Xbox-emulation output can be used instead.
+
 SHARING
 Keep LICENSE, THIRD-PARTY.md, and SOURCE.txt with the app when sharing.
 SOURCE.txt identifies the exact matching source code for this custom build.
