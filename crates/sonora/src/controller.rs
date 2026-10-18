@@ -159,7 +159,7 @@ impl Reader {
                 continue;
             }
             let bits = state.Gamepad.wButtons;
-            let buttons = (u8::from(bits.contains(XINPUT_GAMEPAD_BACK)) * MODIFIER)
+            let buttons = u8::from(bits.contains(XINPUT_GAMEPAD_BACK))
                 | (u8::from(bits.contains(XINPUT_GAMEPAD_LEFT_SHOULDER)) * PREVIOUS)
                 | (u8::from(bits.contains(XINPUT_GAMEPAD_RIGHT_SHOULDER)) * NEXT);
             if let Some(command) = self.xbox[index].read(buttons, enabled) {
@@ -230,7 +230,7 @@ fn dualsense_buttons(report: &[u8]) -> Option<u8> {
         _ => return None,
     };
     let bits = *report.get(offset)?;
-    Some((u8::from(bits & 0x10 != 0) * MODIFIER)
+    Some(u8::from(bits & 0x10 != 0)
         | (u8::from(bits & 0x01 != 0) * PREVIOUS)
         | (u8::from(bits & 0x02 != 0) * NEXT))
 }
@@ -241,7 +241,7 @@ fn run(reader: Reader) -> windows::core::Result<()> {
         let module = GetModuleHandleW(None)?;
         let class = w!("SonoraControllerInput");
         let wc = WNDCLASSW { hInstance: module.into(), lpszClassName: class, lpfnWndProc: Some(window_proc), ..Default::default() };
-        if RegisterClassW(&wc) == 0 { return Err(windows::core::Error::from_win32()); }
+        if RegisterClassW(&wc) == 0 { return Err(windows::core::Error::from_thread()); }
         let window = CreateWindowExW(WINDOW_EX_STYLE::default(), class, w!(""), WINDOW_STYLE::default(),
             0, 0, 0, 0, Some(HWND_MESSAGE), None, Some(module.into()), None)?;
         let devices = [RAWINPUTDEVICE { usUsagePage: 1, usUsage: 5,
@@ -252,9 +252,10 @@ fn run(reader: Reader) -> windows::core::Result<()> {
         }
         READER.with(|slot| *slot.borrow_mut() = Some(reader));
         if SetTimer(Some(window), 1, POLL_MS, None) == 0 {
+            let error = windows::core::Error::from_thread();
             DestroyWindow(window).ok();
             READER.with(|slot| slot.borrow_mut().take());
-            return Err(windows::core::Error::from_win32());
+            return Err(error);
         }
         let mut message = MSG::default();
         while GetMessageW(&mut message, None, 0, 0).0 > 0 {
