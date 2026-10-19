@@ -1,6 +1,6 @@
 use gpui::prelude::*;
 use gpui::{
-    App, ClickEvent, Div, ElementId, Hsla, Interactivity, MouseButton, Pixels, SharedString,
+    AnyElement, App, ClickEvent, Div, ElementId, Hsla, Interactivity, MouseButton, Pixels, SharedString,
     Stateful, StyleRefinement, Window, div, px, svg,
 };
 
@@ -33,6 +33,7 @@ pub struct Button {
     base: Stateful<Div>,
     label: Option<SharedString>,
     icon: Option<SharedString>,
+    content: Option<AnyElement>,
     trailing: Option<SharedString>,
     variant: Variant,
     small: bool,
@@ -56,6 +57,7 @@ impl Button {
             base: div().id(id),
             label: None,
             icon: None,
+            content: None,
             trailing: None,
             variant: Variant::Ghost,
             small: false,
@@ -80,6 +82,12 @@ impl Button {
 
     pub fn icon(mut self, path: impl Into<SharedString>) -> Self {
         self.icon = Some(path.into());
+        self
+    }
+
+    /// Custom content, such as a transitioning icon, inside the standard button hit area.
+    pub fn content(mut self, element: impl IntoElement) -> Self {
+        self.content = Some(element.into_any_element());
         self
     }
 
@@ -221,6 +229,7 @@ impl RenderOnce for Button {
             mut base,
             label,
             icon,
+            content,
             trailing,
             variant,
             small,
@@ -358,6 +367,7 @@ impl RenderOnce for Button {
                         .text_color(foreground),
                 )
             })
+            .when_some(content, |this, content| this.child(content))
             .when_some(label, |this, label| {
                 this.child(
                     div()

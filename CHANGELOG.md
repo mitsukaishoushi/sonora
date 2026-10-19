@@ -13,6 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The compact player eases between play and pause, gently resizes its artwork, and animates hover and click feedback.
+  These short transitions follow the reduced-motion setting and leave the artwork-only player unchanged.
 - Skip tracks while gaming with Xbox View + RB/LB or DualSense Create + R1/L1 on Windows.
   Controller shortcuts can be turned off in Settings, under Playback.
 - Open a separate compact player with Ctrl+Shift+N or from the album-cover player's right-click menu.

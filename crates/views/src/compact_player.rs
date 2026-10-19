@@ -1,5 +1,7 @@
 //! A second companion window. It shares playback, but owns its own layout and saved frame.
 
+mod motion;
+
 use std::time::Duration;
 
 use gpui::prelude::*;
@@ -7,7 +9,7 @@ use gpui::{
     AnyWindowHandle, App, Bounds, Context, Entity, FocusHandle, FontWeight, MouseButton,
     Pixels, Render, ScrollWheelEvent, SharedString, Size, Subscription, Window,
     WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions,
-    div, point, px, size,
+    div, point, px, size, svg,
 };
 use i18n::t;
 use input::{CloseWindow, OpenPlayerLyrics, OpenPlayerQueue, ToggleCompactPlayer, ToggleMiniPlayer, WORKSPACE_CONTEXT};
@@ -16,13 +18,18 @@ use ui::{ActiveTheme as _, Artwork, Button, Dismiss, ExplicitBadge, Scrubber, Sc
 
 #[cfg(target_os = "windows")]
 use crate::mini_player::native;
-use crate::shared::transport::{NOTCH, next, previous, toggle, volume_icon};
+use crate::shared::transport::{NOTCH, next, previous, volume_icon};
+use self::motion::{Control, Feedback};
 
 const WIDTH_COVERS: f32 = 2.5;
 const HEIGHT_CONTROLS: f32 = 5.;
 const ARTWORK_CONTROLS: f32 = 1.75;
 const SCALES: [f32; 3] = [0.9, 1., 1.15];
 const PIXEL: Pixels = px(1.);
+const PAUSED_COVER_SCALE: f32 = 0.86;
+const PAUSED_COVER_OPACITY: f32 = 0.88;
+const PRESSED_SCALE: f32 = 0.9;
+const PRESSED_FILL: f32 = 0.14;
 
 /// A compact transport card independent of the artwork-only mini player.
 pub(crate) struct CompactPlayer {
@@ -35,6 +42,7 @@ pub(crate) struct CompactPlayer {
     pending: Option<f32>,
     muted: Option<f32>,
     menu_open: bool,
+    feedback: Feedback,
     _bounds_watch: Subscription,
 }
 
@@ -83,10 +91,12 @@ impl CompactPlayer {
                 let bounds_watch = cx.observe_window_bounds(window, |this: &mut Self, window, cx| {
                     this.settings.update(cx, |settings, cx| settings.keep_compact_player_frame(window, cx));
                 });
+                let playing = playback.read(cx).wants_playing();
                 Self {
                     playback, queue, settings, parent, focus,
                     seek: ScrubberState::new("compact-seek"),
                     pending: None, muted: None, menu_open: false,
+                    feedback: Feedback::new(playing),
                     _bounds_watch: bounds_watch,
                 }
             })
@@ -123,6 +133,25 @@ impl CompactPlayer {
         let Some(fraction) = self.pending.take() else { return; };
         self.playback.update(cx, |playback, cx| playback.seek_fraction(fraction, cx));
         cx.notify();
+    }
+
+    /// Visual feedback stays separate from the one playback command each click sends.
+    fn press(&mut self, control: Control, cx: &mut Context<Self>) {
+        self.feedback.tap(control);
+        cx.notify();
+    }
+
+    fn feedback_button(&mut self, control: Control, button: Button, enabled: bool, window: &Window, cx: &Context<Self>) -> Button {
+        let (scale, fill) = self.feedback.button(control, enabled, window, cx);
+        let tint = cx.theme().popover_foreground;
+        button.backgroundless().bg(tint.opacity(fill)).layer_scale(scale)
+            .when(enabled, |button| button.active(move |style| {
+                style.bg(tint.opacity(PRESSED_FILL)).layer_scale(PRESSED_SCALE)
+            }))
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                this.feedback.hover(control, enabled && *hovered);
+                cx.notify();
+            }))
     }
 
     /// Lyrics and queue use Sonora's existing panels; opening them leaves both companions intact.
@@ -234,11 +263,18 @@ impl Render for CompactPlayer {
         let elapsed = self.pending.map(|fraction| total.mul_f32(fraction)).unwrap_or_else(|| playback.position());
         let progress = self.pending.unwrap_or_else(|| playback.progress());
         let seekable = track.is_some() && !total.is_zero();
+        let loaded = track.is_some();
+        let playing = playback.wants_playing();
+        let can_previous = playback.has_previous(cx);
+        let can_next = self.queue.read(cx).has_next();
         let volume = playback.volume();
         let font = crate::root::ui_font(self.settings.read(cx).font());
         let text = theme.text(Text::Small);
         let clock_width = text * match total.as_secs() >= 3600 { true => 5., false => 3.5 };
         let remaining = clock(total.saturating_sub(elapsed));
+        let play_mix = self.feedback.playback(playing, window, cx);
+        let cover_scale = PAUSED_COVER_SCALE + (1. - PAUSED_COVER_SCALE) * play_mix;
+        let cover_opacity = PAUSED_COVER_OPACITY + (1. - PAUSED_COVER_OPACITY) * play_mix;
 
         let header = div()
             .id("compact-drag-area")
@@ -246,7 +282,9 @@ impl Render for CompactPlayer {
             .h(artwork).flex_none().min_w_0()
             .window_control_area(gpui::WindowControlArea::Drag)
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
-            .child(Artwork::new(cover).size(artwork).corner_radius(theme.radius / 2.))
+            .child(div().size(artwork).flex_none().child(
+                Artwork::new(cover).size(artwork).corner_radius(theme.radius / 2.)
+                    .layer_scale(cover_scale).opacity(cover_opacity)))
             .child(div().flex().flex_col().justify_center().flex_1().min_w_0()
                 .child(div().flex().items_center().min_w_0().gap_1()
                     .child(div().min_w_0().truncate().font_weight(FontWeight::SEMIBOLD).child(title))
@@ -267,22 +305,57 @@ impl Render for CompactPlayer {
             .child(div().w(clock_width).flex_none().text_right().whitespace_nowrap()
                 .child(t!("compact-remaining", time = &remaining)));
 
+        let volume_button = Button::new("compact-volume").ghost().small().icon(volume_icon(volume))
+            .tooltip_above(match volume <= 0. { true => "player-unmute", false => "player-mute" })
+            .on_click(cx.listener(|this, _, _, cx| { this.press(Control::Volume, cx); this.mute(cx); }));
+        let volume_button = self.feedback_button(Control::Volume, volume_button, true, window, cx);
+        let options_button = Button::new("compact-options").ghost().small().icon("icons/ellipsis.svg")
+            .tooltip_above("compact-options").on_click(cx.listener(|this, _, window, cx| {
+                this.press(Control::Options, cx); this.open_menu(window, cx);
+            }));
+        let options_button = self.feedback_button(Control::Options, options_button, true, window, cx);
+        let previous_button = previous(&self.playback, false, cx).on_click(cx.listener(|this, _, _, cx| {
+            this.press(Control::Previous, cx);
+            this.playback.update(cx, |playback, cx| playback.previous(cx));
+        }));
+        let previous_button = self.feedback_button(Control::Previous, previous_button, can_previous, window, cx);
+
+        // Both glyphs share one stable button and one hit area throughout the crossfade.
+        let glyph = theme.metrics.control / 2.;
+        let foreground = match loaded { true => theme.popover_foreground, false => theme.muted_foreground };
+        let playback_icon = div().relative().size(glyph)
+            .child(svg().absolute().inset_0().size(glyph).path(icons::path("icons/play.svg"))
+                .text_color(foreground).opacity(1. - play_mix).layer_scale(1. - 0.2 * play_mix))
+            .child(svg().absolute().inset_0().size(glyph).path(icons::path("icons/pause.svg"))
+                .text_color(foreground).opacity(play_mix).layer_scale(0.8 + 0.2 * play_mix));
+        let playback_button = Button::new("compact-toggle").ghost().content(playback_icon)
+            .disabled(!loaded).tooltip_above(match playing { true => "play-pause", false => "play-resume" })
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.press(Control::Playback, cx);
+                this.playback.update(cx, |playback, cx| playback.toggle_play(cx));
+            }));
+        let playback_button = self.feedback_button(Control::Playback, playback_button, loaded, window, cx);
+        let next_button = next(&self.playback, &self.queue, false, cx).on_click(cx.listener(|this, _, _, cx| {
+            this.press(Control::Next, cx);
+            this.playback.update(cx, |playback, cx| playback.next(cx));
+        }));
+        let next_button = self.feedback_button(Control::Next, next_button, can_next, window, cx);
+        let lyrics_button = Button::new("compact-lyrics").ghost().small().icon("icons/mic-vocal.svg")
+            .tooltip_above("compact-lyrics").on_click(cx.listener(|this, _, _, cx| {
+                this.press(Control::Lyrics, cx); this.show_panel(true, cx);
+            }));
+        let lyrics_button = self.feedback_button(Control::Lyrics, lyrics_button, true, window, cx);
+        let queue_button = Button::new("compact-queue").ghost().small().icon("icons/list-music.svg")
+            .tooltip_above("compact-queue").on_click(cx.listener(|this, _, _, cx| {
+                this.press(Control::Queue, cx); this.show_panel(false, cx);
+            }));
+        let queue_button = self.feedback_button(Control::Queue, queue_button, true, window, cx);
+
         let controls = div().flex().items_center().justify_between().h(theme.metrics.control).flex_none()
-            .child(div().flex().items_center()
-                .child(Button::new("compact-volume").ghost().backgroundless().small().icon(volume_icon(volume))
-                    .tooltip_above(match volume <= 0. { true => "player-unmute", false => "player-mute" })
-                    .on_click(cx.listener(|this, _, _, cx| this.mute(cx))))
-                .child(Button::new("compact-options").ghost().backgroundless().small().icon("icons/ellipsis.svg")
-                    .tooltip_above("compact-options").on_click(cx.listener(|this, _, window, cx| this.open_menu(window, cx)))))
+            .child(div().flex().items_center().child(volume_button).child(options_button))
             .child(div().flex().items_center().gap_1()
-                .child(previous(&self.playback, false, cx).backgroundless())
-                .child(toggle(&self.playback, true, false, cx).backgroundless())
-                .child(next(&self.playback, &self.queue, false, cx).backgroundless()))
-            .child(div().flex().items_center()
-                .child(Button::new("compact-lyrics").ghost().backgroundless().small().icon("icons/mic-vocal.svg")
-                    .tooltip_above("compact-lyrics").on_click(cx.listener(|this, _, _, cx| this.show_panel(true, cx))))
-                .child(Button::new("compact-queue").ghost().backgroundless().small().icon("icons/list-music.svg")
-                    .tooltip_above("compact-queue").on_click(cx.listener(|this, _, _, cx| this.show_panel(false, cx)))));
+                .child(previous_button).child(playback_button).child(next_button))
+            .child(div().flex().items_center().child(lyrics_button).child(queue_button));
 
         div().id("compact-player").key_context(WORKSPACE_CONTEXT).track_focus(&self.focus)
             .relative().size_full().rounded(theme.radius).overflow_hidden()

@@ -28,6 +28,8 @@ Both players can be open at once. They share the same music playback.
 The compact card has small artwork, track and album details, a seek bar,
 elapsed and remaining time, mute/volume, previous/play/next, and player options.
 Its lyrics and queue buttons open the existing Sonora panels.
+Play/pause icons fade between states; artwork gently shrinks when paused and returns when playing.
+Controls animate on hover and click. These short transitions follow Sonora's reduced-motion setting.
 Drag its artwork/title area to move it. Scroll over the card to adjust volume.
 Right-click the card or select its three-dot button for position, size, and
 always-on-top options. Its position, size, and topmost setting are saved separately.
