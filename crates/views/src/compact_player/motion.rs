@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use gpui::{App, Window};
 use ui::Motion;
 
-const COUNT: usize = 7;
+const COUNT: usize = 6;
 const HOVER_LIFT: f32 = 0.04;
 const CLICK_DIP: f32 = 0.12;
 const HOVER_FILL: f32 = 0.09;
@@ -18,7 +18,6 @@ pub(super) enum Control {
     Previous,
     Playback,
     Next,
-    Lyrics,
     Queue,
 }
 

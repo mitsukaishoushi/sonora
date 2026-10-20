@@ -929,4 +929,6 @@ compact-track-detail = { $artist } — { $album }
 compact-remaining = -{ $time }
 
 settings-controller-shortcuts = Controller shortcuts
+settings-compact-opacity = Compact player background opacity
+settings-compact-opacity-detail = Background tint for the Ctrl+Shift+N player. Artwork and controls stay visible.
 settings-controller-shortcuts-detail = Next / previous: Xbox View + RB / LB or DualSense Create + R1 / L1.

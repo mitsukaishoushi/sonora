@@ -306,6 +306,7 @@ struct Values {
     tray_icon: bool,
     stay_awake: bool,
     controller_shortcuts: bool,
+    compact_player_opacity: f32,
     language: String,
     #[serde(default = "system_font")]
     font: String,
@@ -470,6 +471,7 @@ impl Default for Values {
             tray_icon: true,
             stay_awake: true,
             controller_shortcuts: cfg!(target_os = "windows"),
+            compact_player_opacity: 0.72,
             language: i18n::AUTO.to_owned(),
             font: system_font(),
             startup: DEFAULT_STARTUP.to_owned(),
@@ -1314,6 +1316,24 @@ impl AppSettings {
 
     pub fn set_controller_shortcuts(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.values.controller_shortcuts = enabled;
+        self.schedule_save(cx);
+    }
+
+    /// Background tint opacity for the compact card; artwork and controls remain visible.
+    pub fn compact_player_opacity(&self) -> f32 {
+        let opacity = self.values.compact_player_opacity;
+        match opacity.is_finite() {
+            true => opacity.clamp(0., 1.),
+            false => Values::default().compact_player_opacity,
+        }
+    }
+
+    /// Persists the compact card's background opacity and updates any open card immediately.
+    pub fn set_compact_player_opacity(&mut self, opacity: f32, cx: &mut Context<Self>) {
+        if !opacity.is_finite() {
+            return;
+        }
+        self.values.compact_player_opacity = (opacity.clamp(0., 1.) * 100.).round() / 100.;
         self.schedule_save(cx);
     }
 

@@ -27,7 +27,11 @@ Both players can be open at once. They share the same music playback.
 
 The compact card has small artwork, track and album details, a seek bar,
 elapsed and remaining time, mute/volume, previous/play/next, and player options.
-Its lyrics and queue buttons open the existing Sonora panels.
+Its queue button opens the existing Sonora queue panel.
+Settings > Appearance > Compact player background opacity adjusts only the card's
+background tint, from 0% to 100%. Changes apply live and are saved automatically.
+Artwork and controls stay visible. The microphone buttons have been removed from
+the compact card and the main window's bottom playback bar.
 Play/pause icons fade between states; artwork gently shrinks when paused and returns when playing.
 Controls animate on hover and click. These short transitions follow Sonora's reduced-motion setting.
 Drag its artwork/title area to move it. Scroll over the card to adjust volume.

@@ -142,6 +142,7 @@ enum Slot {
     VisualizerAbsolute,
     Icons,
     Opacity,
+    CompactOpacity,
     WindowBlur,
     Blur,
     Corners,
@@ -317,6 +318,7 @@ pub struct SettingsView {
     column: Option<Pixels>,
     scrollbar: Entity<Scrollbar>,
     opacity: ScrubberState,
+    compact_opacity: ScrubberState,
     sleep: ScrubberState,
     /// One slider per equalizer band, lowest first.
     bands: Vec<ScrubberState>,
@@ -419,6 +421,7 @@ impl SettingsView {
             column: None,
             scrollbar: cx.new(|_| Scrollbar::new(ScrollHandle::new()).watching(me)),
             opacity: ScrubberState::new("opacity"),
+            compact_opacity: ScrubberState::new("compact-opacity"),
             sleep: ScrubberState::new("sleep"),
             bands: (0..equalizer::BANDS)
                 .map(|band| ScrubberState::new(format!("equalizer-band-{band}")))
@@ -573,6 +576,7 @@ impl SettingsView {
                 Slot::Adaptive,
                 Slot::Icons,
                 Slot::Opacity,
+                Slot::CompactOpacity,
             ]
             .into_iter()
             .chain(ui::WINDOW_BLUR.then_some(Slot::WindowBlur))
@@ -712,6 +716,7 @@ impl SettingsView {
             ),
             Slot::Icons => (t!("settings-icons"), t!("settings-icons-detail")),
             Slot::Opacity => (t!("settings-opacity"), t!("settings-opacity-detail")),
+            Slot::CompactOpacity => (t!("settings-compact-opacity"), t!("settings-compact-opacity-detail")),
             Slot::WindowBlur => (
                 t!("settings-blur-window"),
                 t!("settings-blur-window-detail"),
@@ -969,6 +974,7 @@ impl SettingsView {
             Slot::VisualizerAbsolute => self.visualizer_absolute_row(cx).element,
             Slot::Icons => self.icons_row(cx).element,
             Slot::Opacity => self.opacity_row(cx).element,
+            Slot::CompactOpacity => self.compact_opacity_row(cx).element,
             Slot::WindowBlur => self.blur_window_row(cx).element,
             Slot::Blur => self.blur_row(cx).element,
             Slot::Corners => self.corners_row(cx).element,
@@ -1909,6 +1915,33 @@ impl SettingsView {
             t!("settings-opacity-detail"),
             muted,
             small,
+            control.into_any_element(),
+        )
+    }
+
+    /// Independent background opacity for the Ctrl+Shift+N card, applied live.
+    fn compact_opacity_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let opacity = self.settings.read(cx).compact_player_opacity();
+        let percent = (opacity * 100.).round() as i64;
+        let control = div().flex().items_center().gap_2()
+            .child(div().w(theme.metrics.cover).child(
+                Scrubber::new(&self.compact_opacity, opacity)
+                    .colors(theme.progress_bar, theme.muted, theme.foreground)
+                    .on_move(cx.listener(|this, fraction: &f32, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_compact_player_opacity(*fraction, cx);
+                        });
+                    })),
+            ))
+            .child(div().flex_none().w(theme.metrics.control * 1.5)
+                .whitespace_nowrap().text_right()
+                .child(t!("settings-opacity-value", percent = percent)));
+        self.row(
+            t!("settings-compact-opacity"),
+            t!("settings-compact-opacity-detail"),
+            theme.muted_foreground,
+            theme.text(Text::Small),
             control.into_any_element(),
         )
     }

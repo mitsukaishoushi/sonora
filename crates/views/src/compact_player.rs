@@ -12,7 +12,7 @@ use gpui::{
     div, point, px, size, svg,
 };
 use i18n::t;
-use input::{CloseWindow, OpenPlayerLyrics, OpenPlayerQueue, ToggleCompactPlayer, ToggleMiniPlayer, WORKSPACE_CONTEXT};
+use input::{CloseWindow, OpenPlayerQueue, ToggleCompactPlayer, ToggleMiniPlayer, WORKSPACE_CONTEXT};
 use state::{AppSettings, Playback, Queue, Sonora};
 use ui::{ActiveTheme as _, Artwork, Button, Dismiss, ExplicitBadge, Scrubber, ScrubberState, Text, clock, tabular};
 
@@ -154,15 +154,11 @@ impl CompactPlayer {
             }))
     }
 
-    /// Lyrics and queue use Sonora's existing panels; opening them leaves both companions intact.
-    fn show_panel(&self, lyrics: bool, cx: &mut App) {
+    /// Opens Sonora's existing queue without closing either companion.
+    fn show_queue(&self, cx: &mut App) {
         self.parent.update(cx, |_, window, cx| {
             window.activate_window();
-            let action: Box<dyn gpui::Action> = match lyrics {
-                true => Box::new(OpenPlayerLyrics),
-                false => Box::new(OpenPlayerQueue),
-            };
-            window.dispatch_action(action, cx);
+            window.dispatch_action(Box::new(OpenPlayerQueue), cx);
         }).ok();
     }
 
@@ -340,14 +336,9 @@ impl Render for CompactPlayer {
             this.playback.update(cx, |playback, cx| playback.next(cx));
         }));
         let next_button = self.feedback_button(Control::Next, next_button, can_next, window, cx);
-        let lyrics_button = Button::new("compact-lyrics").ghost().small().icon("icons/mic-vocal.svg")
-            .tooltip_above("compact-lyrics").on_click(cx.listener(|this, _, _, cx| {
-                this.press(Control::Lyrics, cx); this.show_panel(true, cx);
-            }));
-        let lyrics_button = self.feedback_button(Control::Lyrics, lyrics_button, true, window, cx);
         let queue_button = Button::new("compact-queue").ghost().small().icon("icons/list-music.svg")
             .tooltip_above("compact-queue").on_click(cx.listener(|this, _, _, cx| {
-                this.press(Control::Queue, cx); this.show_panel(false, cx);
+                this.press(Control::Queue, cx); this.show_queue(cx);
             }));
         let queue_button = self.feedback_button(Control::Queue, queue_button, true, window, cx);
 
@@ -355,11 +346,11 @@ impl Render for CompactPlayer {
             .child(div().flex().items_center().child(volume_button).child(options_button))
             .child(div().flex().items_center().gap_1()
                 .child(previous_button).child(playback_button).child(next_button))
-            .child(div().flex().items_center().child(lyrics_button).child(queue_button));
+            .child(queue_button);
 
         div().id("compact-player").key_context(WORKSPACE_CONTEXT).track_focus(&self.focus)
             .relative().size_full().rounded(theme.radius).overflow_hidden()
-            .bg(theme.popover.opacity(0.72)).border_1().border_color(theme.border.opacity(0.6))
+            .bg(theme.popover.opacity(self.settings.read(cx).compact_player_opacity())).border_1().border_color(theme.border.opacity(0.6))
             .text_color(theme.popover_foreground).text_size(theme.font_size).font(font)
             .flex().flex_col().justify_between().p(pad)
             .on_scroll_wheel(cx.listener(Self::turn_volume))

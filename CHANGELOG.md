@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Adjust the compact player's background opacity in Settings, under Appearance, without fading its artwork or controls.
+- Remove the microphone button from the compact player and the main window's bottom playback bar.
+
 ### Fixed
 
 - Keep the mini player's artwork square and edge-to-edge after choosing a position or cover size on Windows.

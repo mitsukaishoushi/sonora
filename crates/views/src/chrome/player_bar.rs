@@ -9,7 +9,7 @@ use gpui::{
 };
 use gpui::{Window, div, px};
 use i18n::t;
-use input::{ToggleFullscreen, ToggleLyrics, ToggleMiniPlayer, ToggleQueue};
+use input::{ToggleFullscreen, ToggleMiniPlayer, ToggleQueue};
 use state::{AppSettings, Playback, Queue, SideTab, Sonora};
 use ui::{
     Artwork, Button, ExplicitBadge, InlineLink, InlineLinks, Popup, Room, Scrollbar, Scrubber,
@@ -209,11 +209,7 @@ impl PlayerBar {
                     false => theme.muted_foreground,
                 })
                 .on_click(move |_, window, cx| {
-                    let action: Box<dyn gpui::Action> = match side {
-                        SideTab::Queue => Box::new(ToggleQueue),
-                        SideTab::Lyrics => Box::new(ToggleLyrics),
-                    };
-                    window.dispatch_action(action, cx);
+                    window.dispatch_action(Box::new(ToggleQueue), cx);
                 })
         };
 
@@ -222,12 +218,6 @@ impl PlayerBar {
             .flex_none()
             .items_center()
             .gap_1()
-            .child(button(
-                "player-lyrics",
-                "icons/mic-vocal.svg",
-                "lyrics-title",
-                SideTab::Lyrics,
-            ))
             .child(button(
                 "player-queue",
                 "icons/list-music.svg",
