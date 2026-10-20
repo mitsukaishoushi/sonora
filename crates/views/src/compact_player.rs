@@ -342,11 +342,12 @@ impl Render for CompactPlayer {
             }));
         let queue_button = self.feedback_button(Control::Queue, queue_button, true, window, cx);
 
-        let controls = div().flex().items_center().justify_between().h(theme.metrics.control).flex_none()
-            .child(div().flex().items_center().child(volume_button).child(options_button))
-            .child(div().flex().items_center().gap_1()
+        // Equal flexible side lanes keep transport centered despite different button counts.
+        let controls = div().flex().items_center().h(theme.metrics.control).flex_none()
+            .child(div().flex().flex_1().min_w_0().items_center().child(volume_button).child(options_button))
+            .child(div().flex().flex_none().items_center().gap_1()
                 .child(previous_button).child(playback_button).child(next_button))
-            .child(queue_button);
+            .child(div().flex().flex_1().min_w_0().items_center().justify_end().child(queue_button));
 
         div().id("compact-player").key_context(WORKSPACE_CONTEXT).track_focus(&self.focus)
             .relative().size_full().rounded(theme.radius).overflow_hidden()

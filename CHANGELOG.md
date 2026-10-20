@@ -14,6 +14,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Keep the compact player's previous, play/pause, and next controls centered after removing the microphone button.
 - Keep the mini player's artwork square and edge-to-edge after choosing a position or cover size on Windows.
 
 ### Added
