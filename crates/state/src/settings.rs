@@ -1861,7 +1861,11 @@ impl AppSettings {
     }
 
     pub fn keep_compact_player_frame(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let bounds = window.bounds();
+        self.keep_compact_player_bounds(window.bounds(), cx);
+    }
+
+    /// Saves the collapsed card frame, excluding its temporary expanding queue.
+    pub fn keep_compact_player_bounds(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
         let frame = Frame {
             x: bounds.origin.x / px(1.),
             y: bounds.origin.y / px(1.),

@@ -924,7 +924,13 @@ compact-open = Open compact player (Ctrl+Shift+N)
 compact-size = Card size
 compact-options = Player options
 compact-lyrics = Open lyrics in Sonora
-compact-queue = Open queue in Sonora
+compact-queue = Expand queue
+compact-queue-close = Collapse queue
+compact-queue-count =
+    { $count ->
+        [one] 1 track
+       *[other] { $count } tracks
+    }
 compact-track-detail = { $artist } — { $album }
 compact-remaining = -{ $time }
 

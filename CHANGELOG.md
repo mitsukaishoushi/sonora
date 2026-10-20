@@ -19,6 +19,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Expand a smoothly animated Up next queue from the compact player without opening the main window.
+  Scroll and play queued tracks in place; the panel opens upward when there is more room above the card.
 - The compact player eases between play and pause, gently resizes its artwork, and animates hover and click feedback.
   These short transitions follow the reduced-motion setting and leave the artwork-only player unchanged.
 - Skip tracks while gaming with Xbox View + RB/LB or DualSense Create + R1/L1 on Windows.

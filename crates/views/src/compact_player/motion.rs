@@ -22,7 +22,7 @@ pub(super) enum Control {
 }
 
 /// Retargets from the current drawn value, so rapid changes never restart from an endpoint.
-struct Scalar {
+pub(super) struct Scalar {
     from: f32,
     to: f32,
     started: Instant,
@@ -30,7 +30,7 @@ struct Scalar {
 }
 
 impl Scalar {
-    fn new(value: f32) -> Self {
+    pub(super) fn new(value: f32) -> Self {
         Self { from: value, to: value, started: Instant::now(), span: Duration::ZERO }
     }
 
@@ -40,7 +40,7 @@ impl Scalar {
         self.from + (self.to - self.from) * ui::ease_out_cubic(progress)
     }
 
-    fn towards(&mut self, target: f32, motion: Motion, window: &Window, cx: &App) -> f32 {
+    pub(super) fn towards(&mut self, target: f32, motion: Motion, window: &Window, cx: &App) -> f32 {
         if !ui::motion::animates(cx) {
             self.from = target;
             self.to = target;

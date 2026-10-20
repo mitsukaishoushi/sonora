@@ -1,6 +1,7 @@
 //! A second companion window. It shares playback, but owns its own layout and saved frame.
 
 mod motion;
+mod queue;
 
 use std::time::Duration;
 
@@ -12,7 +13,7 @@ use gpui::{
     div, point, px, size, svg,
 };
 use i18n::t;
-use input::{CloseWindow, OpenPlayerQueue, ToggleCompactPlayer, ToggleMiniPlayer, WORKSPACE_CONTEXT};
+use input::{CloseWindow, ToggleCompactPlayer, ToggleMiniPlayer, WORKSPACE_CONTEXT};
 use state::{AppSettings, Playback, Queue, Sonora};
 use ui::{ActiveTheme as _, Artwork, Button, Dismiss, ExplicitBadge, Scrubber, ScrubberState, Text, clock, tabular};
 
@@ -20,6 +21,7 @@ use ui::{ActiveTheme as _, Artwork, Button, Dismiss, ExplicitBadge, Scrubber, Sc
 use crate::mini_player::native;
 use crate::shared::transport::{NOTCH, next, previous, volume_icon};
 use self::motion::{Control, Feedback};
+use self::queue::Drawer;
 
 const WIDTH_COVERS: f32 = 2.5;
 const HEIGHT_CONTROLS: f32 = 5.;
@@ -43,6 +45,7 @@ pub(crate) struct CompactPlayer {
     muted: Option<f32>,
     menu_open: bool,
     feedback: Feedback,
+    drawer: Drawer,
     _bounds_watch: Subscription,
 }
 
@@ -89,7 +92,7 @@ impl CompactPlayer {
                 window.focus(&focus, cx);
                 settings.update(cx, |settings, cx| settings.keep_compact_player_frame(window, cx));
                 let bounds_watch = cx.observe_window_bounds(window, |this: &mut Self, window, cx| {
-                    this.settings.update(cx, |settings, cx| settings.keep_compact_player_frame(window, cx));
+                    this.keep_card_frame(window, cx);
                 });
                 let playing = playback.read(cx).wants_playing();
                 Self {
@@ -97,6 +100,7 @@ impl CompactPlayer {
                     seek: ScrubberState::new("compact-seek"),
                     pending: None, muted: None, menu_open: false,
                     feedback: Feedback::new(playing),
+                    drawer: Drawer::new(bounds, cx),
                     _bounds_watch: bounds_watch,
                 }
             })
@@ -104,7 +108,7 @@ impl CompactPlayer {
     }
 
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.settings.update(cx, |settings, cx| settings.keep_compact_player_frame(window, cx));
+        self.keep_card_frame(window, cx);
         restore(self.parent, cx);
         window.remove_window();
     }
@@ -152,14 +156,6 @@ impl CompactPlayer {
                 this.feedback.hover(control, enabled && *hovered);
                 cx.notify();
             }))
-    }
-
-    /// Opens Sonora's existing queue without closing either companion.
-    fn show_queue(&self, cx: &mut App) {
-        self.parent.update(cx, |_, window, cx| {
-            window.activate_window();
-            window.dispatch_action(Box::new(OpenPlayerQueue), cx);
-        }).ok();
     }
 
     fn artwork_player(&self, cx: &mut App) {
@@ -210,9 +206,11 @@ impl CompactPlayer {
             return;
         }
         if command == 22 { self.close(window, cx); return; }
+        if !matches!(command, 1..=6 | 11..=13) { return; }
+        self.collapse_queue(window, cx);
         let Some(display) = window.display(cx) else { return; };
         let work = display.visible_bounds();
-        let current = window.bounds();
+        let current = self.drawer.base;
         let gap = cx.theme().metrics.inset;
         let bounds = match command {
             1..=6 => {
@@ -234,7 +232,8 @@ impl CompactPlayer {
             }
             _ => return,
         };
-        apply(window, Some(fitted(bounds, work, gap, cx)), None, cx);
+        self.drawer.base = fitted(bounds, work, gap, cx);
+        apply(window, Some(self.drawer.base), None, cx);
     }
 }
 
@@ -242,6 +241,7 @@ impl Render for CompactPlayer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         window.set_rem_size(theme.font_size);
+        let queue_mix = self.animate_queue(window, cx);
         let scale = window.viewport_size().width / dimensions(1., cx).width;
         let pad = theme.metrics.pad * 2. * scale;
         let artwork = theme.metrics.control * ARTWORK_CONTROLS * scale;
@@ -337,8 +337,10 @@ impl Render for CompactPlayer {
         }));
         let next_button = self.feedback_button(Control::Next, next_button, can_next, window, cx);
         let queue_button = Button::new("compact-queue").ghost().small().icon("icons/list-music.svg")
-            .tooltip_above("compact-queue").on_click(cx.listener(|this, _, _, cx| {
-                this.press(Control::Queue, cx); this.show_queue(cx);
+            .tint(match self.drawer.open { true => theme.primary, false => theme.popover_foreground })
+            .tooltip_above(match self.drawer.open { true => "compact-queue-close", false => "compact-queue" })
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.press(Control::Queue, cx); this.toggle_queue(window, cx);
             }));
         let queue_button = self.feedback_button(Control::Queue, queue_button, true, window, cx);
 
@@ -349,20 +351,34 @@ impl Render for CompactPlayer {
                 .child(previous_button).child(playback_button).child(next_button))
             .child(div().flex().flex_1().min_w_0().items_center().justify_end().child(queue_button));
 
+        let player = div().flex().flex_col().justify_between().p(pad).flex_none()
+            .h((self.drawer.base.size.height - PIXEL * 2.).max(PIXEL)).w_full()
+            .on_scroll_wheel(cx.listener(Self::turn_volume))
+            .child(header).child(timeline).child(controls).into_any_element();
+        let drawer = self.queue_panel(queue_mix, window, cx);
+        let contents = match self.drawer.above {
+            true => vec![drawer, player],
+            false => vec![player, drawer],
+        };
+
         div().id("compact-player").key_context(WORKSPACE_CONTEXT).track_focus(&self.focus)
-            .relative().size_full().rounded(theme.radius).overflow_hidden()
+            .relative().size_full().rounded(theme.radius + theme.metrics.pad * queue_mix).overflow_hidden()
             .bg(theme.popover.opacity(self.settings.read(cx).compact_player_opacity())).border_1().border_color(theme.border.opacity(0.6))
             .text_color(theme.popover_foreground).text_size(theme.font_size).font(font)
-            .flex().flex_col().justify_between().p(pad)
-            .on_scroll_wheel(cx.listener(Self::turn_volume))
+            .flex().flex_col()
             .on_mouse_down(MouseButton::Right, cx.listener(|this, _, window, cx| {
                 cx.stop_propagation(); this.open_menu(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &Dismiss, window, cx| this.close(window, cx)))
+            .on_action(cx.listener(|this, _: &Dismiss, window, cx| {
+                match this.drawer.open {
+                    true => this.toggle_queue(window, cx),
+                    false => this.close(window, cx),
+                }
+            }))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| this.close(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleCompactPlayer, window, cx| this.close(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleMiniPlayer, _, cx| this.artwork_player(cx)))
-            .child(header).child(timeline).child(controls)
+            .children(contents)
     }
 }
 

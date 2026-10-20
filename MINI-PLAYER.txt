@@ -27,7 +27,12 @@ Both players can be open at once. They share the same music playback.
 
 The compact card has small artwork, track and album details, a seek bar,
 elapsed and remaining time, mute/volume, previous/play/next, and player options.
-Its queue button opens the existing Sonora queue panel.
+Its queue button smoothly expands an attached Up next panel inside the compact
+player. Scroll the queue and click a track to play it without opening the main app.
+The panel grows upward near the bottom of the screen, and shares the card's
+background opacity. Click the queue button again, the panel's X, or press Escape
+to fold it away. A second Escape closes the card as before.
+Only the collapsed card's position and size are remembered between launches.
 Settings > Appearance > Compact player background opacity adjusts only the card's
 background tint, from 0% to 100%. Changes apply live and are saved automatically.
 Artwork and controls stay visible. The microphone buttons have been removed from
