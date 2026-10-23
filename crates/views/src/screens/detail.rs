@@ -1,17 +1,21 @@
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, Entity, Pixels, Point, Render, ScrollHandle, SharedString,
+    AnyElement, App, Context, Entity, Hsla, Pixels, Point, Render, ScrollHandle, SharedString,
     WeakEntity, Window, div, px,
 };
 
 use std::rc::Rc;
 
 use i18n::t;
-use music::{Album, Playlist, ReleaseType, Track};
+use music::{Album, AlbumDetail, Playlist, ReleaseType, Track};
 use router::{Destination, navigate};
-use state::{AppSettings, Collection, Detail, LibraryEvent, Origin, Playback, Sonora};
+use state::{
+    AppSettings, Collection, Detail, DownloadsChanged, LibraryEvent, Origin, Playback, Progress,
+    Sonora,
+};
 use ui::{
-    ActiveTheme as _, Button, InlineLink, InlineLinks, Menu, Picker, Popovers, Popup, SortAxis,
+    ActiveTheme as _, ArrowRing, Button, InlineLink, InlineLinks, Menu, Picker, Popovers, Popup,
+    SortAxis,
 };
 use ui::{
     ColumnSpec, FilterChange, Listing as _, MIN_CONTENT, Pending, Pin, PinKind, Scrollbar,
@@ -133,6 +137,7 @@ impl DetailView {
 
         let table = cx.new(|cx| {
             let playlist_scrollbar = cx.new(|_| Scrollbar::inset().watching(id));
+            crate::shared::tracks::follow_downloads(cx);
             let source = TrackSource::new(
                 columns,
                 DetailTracks(detail.clone()),
@@ -223,6 +228,18 @@ impl DetailView {
             })
             .detach();
         }
+
+        // Progress only redraws the download button. A filtered table rebuilds when what it
+        // shows may have changed, since a rebuild drops the open menu and the selection.
+        let downloads = Sonora::global(cx).downloads.clone();
+        cx.observe(&downloads, |_, _, cx| cx.notify()).detach();
+        cx.subscribe(&downloads, |this, _, _: &DownloadsChanged, cx| {
+            if this.table.narrowed(cx) {
+                this.rebuild(cx);
+            }
+            cx.notify();
+        })
+        .detach();
 
         let chrome = Chrome::entity(cx);
         cx.observe(&chrome, |_, _, cx| cx.notify()).detach();
@@ -348,6 +365,7 @@ impl DetailView {
         let header = self.detail.read(cx).header();
         let kind = header
             .map(|header| header.kind)
+            .or(self.detail.read(cx).kind())
             .unwrap_or(Collection::Album);
         let release = header
             .and_then(|header| header.release)
@@ -430,6 +448,7 @@ impl DetailView {
                 self.playback.clone(),
             ))
             .children(self.library_button(cx))
+            .children(self.download_button(cx))
             .children(overflow);
 
         let cover = header.and_then(|header| header.cover.clone());
@@ -443,6 +462,7 @@ impl DetailView {
 
         let view = self.me.clone();
         PageHero::new("detail-hero", title)
+            .pending(header.is_none() && self.detail.read(cx).is_loading())
             .pin(pin)
             .cover(cover)
             .eyebrow(eyebrow)
@@ -499,9 +519,11 @@ impl DetailView {
                 false => heart,
             }
             .on_click(move |_, _, cx| match &target {
-                Saveable::Album(album) if saved => Confirm::albums(vec![album.clone()], cx),
+                Saveable::Album(album) if saved && !Confirm::unstarring(&album.id, cx) => {
+                    Confirm::albums(vec![album.clone()], cx)
+                }
                 Saveable::Album(album) => {
-                    library.update(cx, |library, cx| library.toggle_album(album.clone(), cx));
+                    library.update(cx, |library, cx| library.heart_album(album.clone(), cx));
                 }
                 Saveable::Playlist(playlist) if saved => {
                     Confirm::playlists(vec![playlist.id.clone()], cx)
@@ -511,6 +533,65 @@ impl DetailView {
                         library.add_playlist_to_library(playlist.clone(), cx)
                     });
                 }
+            }),
+        )
+    }
+
+    /// Downloads the album or playlist for offline play, or removes its download. It shows for a
+    /// provider whose tracks can be downloaded, and for one that is offline with this page
+    /// downloaded.
+    fn download_button(&self, cx: &App) -> Option<Button> {
+        let theme = *cx.theme();
+        let sonora = Sonora::global(cx);
+        let downloads = sonora.downloads.clone();
+        let detail = self.detail.read(cx);
+        let id = detail.id()?.to_owned();
+        if music::is_local_id(&id) {
+            return None;
+        }
+        let kind = detail.header()?.kind;
+        let progress = downloads.read(cx).set(kind, &id);
+        if progress.is_none() && !sonora.session.read(cx).capabilities().downloads {
+            return None;
+        }
+        let album = detail.album().cloned();
+        let playlist = detail.playlist().cloned();
+        let tracks = detail.tracks().to_vec();
+        let share = downloads.read(cx).share(kind, &id);
+        let ring = |done: f32, color: Hsla| {
+            ArrowRing::new("detail-download-ring", Some(done)).color(color)
+        };
+        let button = Button::new("detail-download").outline();
+        Some(
+            match progress {
+                None => button.icon("icons/download.svg").tooltip("menu-download"),
+                Some(Progress::Failed) => button
+                    .leading(ring(share, theme.danger))
+                    .tooltip("menu-download"),
+                Some(Progress::Waiting | Progress::Running) => button
+                    .leading(ring(share, theme.primary))
+                    .tooltip("menu-downloading"),
+                Some(Progress::Done) => button
+                    .leading(ring(1., theme.primary))
+                    .tooltip("menu-remove-download"),
+            }
+            .on_click(move |_, _, cx| {
+                downloads.update(cx, |downloads, cx| match (progress, &album, &playlist) {
+                    (None | Some(Progress::Failed), Some(album), _) => {
+                        downloads.download_album(
+                            AlbumDetail {
+                                album: album.clone(),
+                                tracks: tracks.clone(),
+                            },
+                            cx,
+                        );
+                    }
+                    (None | Some(Progress::Failed), None, Some(playlist)) => {
+                        downloads.download_playlist_by_id(playlist, cx);
+                    }
+                    (None | Some(Progress::Failed), None, None) => {}
+                    _ => downloads.remove_set(kind, &id, cx),
+                })
             }),
         )
     }
@@ -723,6 +804,7 @@ impl Render for DetailView {
             .size_full()
             .child(
                 Scroller::new("detail-page", &self.scrollbar)
+                    .bottom_inset(crate::chrome::Chrome::bottom(cx))
                     .pt(inset)
                     .pb(inset)
                     .child(div().px(inset).child(self.header(cx)))
@@ -737,9 +819,21 @@ impl Render for DetailView {
 impl DetailView {
     /// The page an album or a playlist shows instead of its header and its table when it cannot
     /// be read: the No connection state as soon as the network is gone, whatever rows this page
-    /// happens to hold, and the failure of its own load otherwise.
+    /// happens to hold, and the failure of its own load otherwise. A downloaded album or
+    /// playlist opens from its kept copy instead, network or not.
     fn failure(&self, cx: &Context<Self>) -> Option<AnyElement> {
-        let id = self.detail.read(cx).id()?.to_owned();
+        let detail = self.detail.read(cx);
+        let id = detail.id()?.to_owned();
+        let kept = detail.kind().is_some_and(|kind| {
+            Sonora::global(cx)
+                .downloads
+                .read(cx)
+                .set(kind, &id)
+                .is_some()
+        });
+        if kept && detail.error().is_none() {
+            return None;
+        }
         let reason = match trouble::unreachable(&id, cx) {
             true => None,
             false => Some(self.detail.read(cx).error()?.to_owned()),
@@ -754,6 +848,7 @@ impl DetailView {
                 move |_, _, cx| {
                     detail.update(cx, |detail, cx| detail.reload(cx));
                 },
+                cx,
             )
             .size_full()
             .into_any_element(),
@@ -789,7 +884,7 @@ impl DetailView {
         self.table
             .read(cx)
             .delegate()
-            .toggles()
+            .toggles(cx)
             .into_iter()
             .filter(|toggle| !PINNED.contains(&toggle.key))
             .collect()

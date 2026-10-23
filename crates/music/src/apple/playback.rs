@@ -17,6 +17,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use rodio::Source as _;
 
+use crate::aac::Aac;
 use crate::apple::client::AppleClient;
 use crate::apple::progressive::{Cenc, Media};
 use crate::apple::stream;
@@ -24,7 +25,8 @@ use crate::audio::Trimmed;
 use crate::engine::{self, Fetch, Loudness};
 use crate::stream::Reader;
 use crate::trim;
-use crate::{PlaybackConfig, PlaybackEvents, PlaybackFactory, Player};
+use crate::vault::Shelf;
+use crate::{Encoding, PlaybackConfig, PlaybackEvents, PlaybackFactory, Player, Quality};
 
 /// Priming frames at the head of an Apple AAC encode, before the first frame of music.
 ///
@@ -34,6 +36,10 @@ use crate::{PlaybackConfig, PlaybackEvents, PlaybackFactory, Player};
 /// dropping it is what keeps a join from starting on a click. The tail is cut by playing only
 /// as much as the catalog says the track lasts, which is the other half of the same problem.
 const PRIMING: u32 = 2112;
+/// Priming frames at the head of Apple's HE-AAC encode, at the output rate. That is the core's 2112
+/// at twice the rate plus the 962 frames the SBR filterbank delays by, and it lines the 64 kbps
+/// stream up with the 256 kbps one to the frame.
+const EXTENDED_PRIMING: u32 = 5186;
 
 /// A track resolved, licensed and arriving, with how long and how loud the catalog says it is.
 #[derive(Clone)]
@@ -41,6 +47,8 @@ pub struct Loaded {
     media: Media,
     duration: Option<Duration>,
     loudness: Option<Loudness>,
+    /// The track is the HE-AAC encode, which primes for `EXTENDED_PRIMING` frames.
+    extended: bool,
 }
 
 pub struct Factory {
@@ -58,6 +66,8 @@ impl PlaybackFactory for Factory {
         engine::start(
             Apple {
                 client: self.client.clone(),
+                quality: config.quality,
+                shelf: config.vault.as_ref().map(|vault| vault.shelf("apple")),
             },
             config,
         )
@@ -66,6 +76,10 @@ impl PlaybackFactory for Factory {
 
 struct Apple {
     client: AppleClient,
+    /// The level every track is asked for at.
+    quality: Quality,
+    /// Where played tracks are kept, still encrypted the way Apple sent them.
+    shelf: Option<Shelf>,
 }
 
 #[async_trait]
@@ -77,6 +91,16 @@ impl Fetch for Apple {
         "apple"
     }
 
+    fn shelf(&self) -> Option<&Shelf> {
+        self.shelf.as_ref()
+    }
+
+    /// A kept track is still encrypted, and the key that opens it is licensed afresh for each
+    /// play and lasts about fifteen minutes, so a download cannot play without the network.
+    fn plays_offline(&self) -> bool {
+        false
+    }
+
     /// Resolves and licenses the track, and asks the catalog how long and how loud it is at the
     /// same time.
     /// The length comes back beside the media rather than after it, because the tail trim that
@@ -84,12 +108,19 @@ impl Fetch for Apple {
     /// only how long the file is.
     async fn load(&self, id: &str) -> Result<Loaded> {
         let (prepared, details) = tokio::join!(
-            stream::prepare(self.client.http(), id, self.client.user_token()),
+            stream::prepare(
+                self.client.http(),
+                id,
+                self.client.user_token(),
+                self.quality,
+                self.shelf.as_ref(),
+            ),
             self.client.playback_details(id),
         );
         let prepared = prepared?;
         Ok(Loaded {
             duration: prepared.duration.or(details.duration),
+            extended: prepared.extended,
             loudness: details.loudness,
             media: prepared.media,
         })
@@ -103,8 +134,22 @@ impl Fetch for Apple {
         loaded.loudness
     }
 
+    /// Reports the resolved asset's AAC bitrate, including a fallback to the other flavour.
+    fn encoding(&self, loaded: &Loaded) -> Option<Encoding> {
+        Some(Encoding::Aac {
+            kbps: match loaded.extended {
+                true => 64,
+                false => 256,
+            },
+        })
+    }
+
     async fn downloaded(&self, loaded: &Loaded) {
         loaded.media.finished().await;
+    }
+
+    fn progress(&self, loaded: &Loaded) -> Option<f32> {
+        loaded.media.progress()
     }
 
     /// A fragmented stream has no index for symphonia to jump around in, so a seek opens a
@@ -136,6 +181,7 @@ impl Fetch for Apple {
             None => media.reader(),
         };
         let decoder = match rodio::Decoder::builder()
+            .with_symphonia_decoder::<Aac>()
             .with_data(reader)
             .with_seekable(false)
             .build()
@@ -150,8 +196,12 @@ impl Fetch for Apple {
         // The edit list decides what is actually heard, and Apple's encode carries none, so the
         // priming is the encoder's own figure and the tail is the catalog length.
         let edit = media.header().as_deref().and_then(trim::from_mp4);
+        let frames = match loaded.extended {
+            true => EXTENDED_PRIMING,
+            false => PRIMING,
+        };
         let priming =
-            Duration::from_secs_f64(f64::from(PRIMING) / f64::from(decoder.sample_rate().get()));
+            Duration::from_secs_f64(f64::from(frames) / f64::from(decoder.sample_rate().get()));
         // Spliced, the priming is behind us and the length no longer lines up with what is
         // left, so the only thing to drop is the part of the first fragment before the position.
         let (skip, take) = match entry {

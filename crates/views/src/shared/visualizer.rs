@@ -57,7 +57,6 @@ impl VisualizerDrive {
                 state.armed = false;
                 return;
             }
-
             let now = Instant::now();
             let rate = match state.beat.replace(now) {
                 Some(beat) if now.duration_since(beat) < STALL => {

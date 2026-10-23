@@ -52,6 +52,7 @@ pub struct TabBar {
     id: ElementId,
     items: Vec<Button>,
     blurred: bool,
+    reveal: Option<usize>,
 }
 
 impl TabBar {
@@ -62,6 +63,7 @@ impl TabBar {
             id: id.into(),
             items: Vec::new(),
             blurred: false,
+            reveal: None,
         }
     }
 
@@ -72,6 +74,14 @@ impl TabBar {
 
     pub fn blurred(mut self) -> Self {
         self.blurred = true;
+        self
+    }
+
+    /// Scrolls a capped bar just far enough to show the item at `index` each time the index
+    /// changes, so a selection made elsewhere never waits behind an edge. While the index holds,
+    /// the row stays where the user left it.
+    pub fn reveal(mut self, index: Option<usize>) -> Self {
+        self.reveal = index;
         self
     }
 }
@@ -112,6 +122,8 @@ struct Rail {
     seen: Cell<(Pixels, Pixels)>,
     /// The leading and trailing edge, in that order.
     edges: Cell<[Edge; 2]>,
+    /// The item the row was last asked to show.
+    revealed: Cell<Option<usize>>,
 }
 
 impl Rail {
@@ -121,6 +133,7 @@ impl Rail {
             glide: Glide::default(),
             seen: Cell::new((Pixels::ZERO, Pixels::ZERO)),
             edges: Cell::new([Edge::default(); 2]),
+            revealed: Cell::new(None),
         }
     }
 
@@ -187,6 +200,7 @@ impl RenderOnce for TabBar {
             id,
             items,
             blurred,
+            reveal,
         } = self;
         let theme = *cx.theme();
         let glassy = blurred && blurring(cx);
@@ -209,6 +223,19 @@ impl RenderOnce for TabBar {
         let rails = capped.then(|| {
             let rail = window.use_keyed_state((id.clone(), "rail"), cx, |_, _| Rail::new());
             let rail = rail.read(cx);
+            // gpui measures the item against the row's bounds from the last layout, so a row
+            // that has not been laid out yet waits a frame before it scrolls
+            if rail.revealed.get() != reveal {
+                match rail.scroll.bounds().size.width > Pixels::ZERO {
+                    true => {
+                        rail.revealed.set(reveal);
+                        if let Some(index) = reveal {
+                            rail.scroll.scroll_to_item(index);
+                        }
+                    }
+                    false => window.request_animation_frame(),
+                }
+            }
             rail.glide.sync(&rail.scroll);
 
             let (at, hidden) = rail.reach();

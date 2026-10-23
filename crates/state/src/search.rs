@@ -151,7 +151,7 @@ impl Search {
                 this.query.clear();
                 this.ask(&pending, cx);
             }
-            SessionEvent::Reconnected | SessionEvent::LocalChanged => {}
+            SessionEvent::Reconnected | SessionEvent::WentOffline | SessionEvent::LocalChanged => {}
         })
         .detach();
 

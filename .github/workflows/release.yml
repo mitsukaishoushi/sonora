@@ -628,7 +628,7 @@ jobs:
           set -euo pipefail
           gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
             -f tag_name="$TAG" --jq .body > notes.md
-          printf '\n[Code signing policy](https://github.com/%s#code-signing)\n' "$GITHUB_REPOSITORY" >> notes.md
+          printf '\n[Code signing policy](https://github.com/%s#code-signing-policy)\n' "$GITHUB_REPOSITORY" >> notes.md
 
       - uses: softprops/action-gh-release@v2
         with:

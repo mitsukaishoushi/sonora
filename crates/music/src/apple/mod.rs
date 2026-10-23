@@ -13,6 +13,7 @@
 
 mod auth;
 mod client;
+mod links;
 mod playback;
 mod progressive;
 mod recommend;
@@ -26,8 +27,8 @@ use async_trait::async_trait;
 
 use crate::apple::playback::Factory;
 use crate::{
-    Capabilities, InputSource, MusicApi as _, MusicProvider, PromptSink, ProviderSession, Shape,
-    SignIn, SignInPrompt, WebSignIn,
+    Capabilities, Catalog, InputSource, MusicApi as _, MusicProvider, PromptSink, ProviderSession,
+    Shape, SignIn, SignInPrompt, WebSignIn,
 };
 
 pub use client::AppleClient;
@@ -93,20 +94,22 @@ fn session(client: AppleClient, profile: crate::UserProfile) -> ProviderSession 
         api: Arc::new(client.clone()),
         playback: Arc::new(Factory::new(client)),
         // The library is what the listener added, and favorites are a separate set on top of
-        // it, the way a self-hosted server's starred items sit on top of its catalog.
-        shape: Shape::Catalog,
+        // it. Songs and albums go into it apart from the star, and a favorited song still
+        // lands in it through the account's Add Favorite Songs to Library setting, which is on
+        // by default.
+        shape: Shape::Catalog(Catalog::Editable),
         authenticated: true,
         // Apple keeps no play counts. Stations it does have, through the same endpoint the web
-        // player's autoplay uses; an artist can be favorited like anything else; the
-        // library is its own thing, which songs and albums are added to apart from the star,
-        // and pins live behind `me/library/pins`.
-        // A favorited song still lands in it, through the account's Add Favorite Songs to
-        // Library setting, which is on by default.
+        // player's autoplay uses. An artist can be favorited like anything else, and pins live
+        // behind `me/library/pins`. A download only saves the fetch, since every play still
+        // needs a license.
         capabilities: Capabilities {
             radio: true,
             follow_artists: true,
-            library: true,
             pins: true,
+            keeps: true,
+            downloads: true,
+            qualities: stream::QUALITIES,
             ..Capabilities::NONE
         },
     }
@@ -126,6 +129,10 @@ impl MusicProvider for AppleProvider {
 
     fn slug(&self) -> &'static str {
         "apple"
+    }
+
+    fn link(&self, link: &str) -> Option<crate::link::Linked> {
+        links::read(link)
     }
 
     fn reach(&self) -> Option<String> {

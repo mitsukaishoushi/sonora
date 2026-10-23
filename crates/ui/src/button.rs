@@ -1,7 +1,10 @@
+use std::f32::consts::TAU;
+
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, ClickEvent, Div, ElementId, Hsla, Interactivity, MouseButton, Pixels, SharedString,
-    Stateful, StyleRefinement, Window, div, px, svg,
+    AnyElement, App, ClickEvent, Div, ElementId, Hsla, Interactivity, MouseButton, Pixels,
+    SharedString, Stateful, StyleRefinement, Transformation, Window, div, px, radians, relative,
+    svg,
 };
 
 use crate::glass::{blurring, frost};
@@ -34,14 +37,19 @@ pub struct Button {
     label: Option<SharedString>,
     icon: Option<SharedString>,
     content: Option<AnyElement>,
+    /// A small element drawn after the icon and before the label, as a picker's curve sketch.
+    leading: Option<AnyElement>,
+    detail: Option<SharedString>,
     trailing: Option<SharedString>,
     variant: Variant,
     small: bool,
     disabled: bool,
     selected: bool,
+    indicator: bool,
     backgroundless: bool,
     hoverless: bool,
     frosted: bool,
+    turn: f32,
     hovered: Option<StyleRefinement>,
     fill: Option<(Hsla, Hsla)>,
     pressed: Option<StyleRefinement>,
@@ -58,14 +66,18 @@ impl Button {
             label: None,
             icon: None,
             content: None,
+            leading: None,
+            detail: None,
             trailing: None,
             variant: Variant::Ghost,
             small: false,
             disabled: false,
             selected: false,
+            indicator: false,
             backgroundless: false,
             hoverless: false,
             frosted: false,
+            turn: 0.,
             hovered: None,
             fill: None,
             pressed: None,
@@ -88,6 +100,18 @@ impl Button {
     /// Custom content, such as a transitioning icon, inside the standard button hit area.
     pub fn content(mut self, element: impl IntoElement) -> Self {
         self.content = Some(element.into_any_element());
+        self
+    }
+
+    pub fn leading(mut self, leading: impl IntoElement) -> Self {
+        self.leading = Some(leading.into_any_element());
+        self
+    }
+
+    /// A current value shown muted after the label and before the trailing icon, the way a row
+    /// that opens a page of its own says what is chosen there.
+    pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
+        self.detail = Some(detail.into());
         self
     }
 
@@ -153,6 +177,12 @@ impl Button {
         self
     }
 
+    /// Paints an active-state dot below the icon without changing the button's layout or hit area.
+    pub fn indicator(mut self, indicator: bool) -> Self {
+        self.indicator = indicator;
+        self
+    }
+
     pub fn backgroundless(mut self) -> Self {
         self.backgroundless = true;
         self
@@ -169,6 +199,12 @@ impl Button {
     /// nothing.
     pub fn frosted(mut self) -> Self {
         self.frosted = true;
+        self
+    }
+
+    /// Rotates the icon by `turn` of a full turn, for an owner that animates it with `Spin`.
+    pub fn turned(mut self, turn: f32) -> Self {
+        self.turn = turn;
         self
     }
 
@@ -230,14 +266,18 @@ impl RenderOnce for Button {
             label,
             icon,
             content,
+            leading,
+            detail,
             trailing,
             variant,
             small,
             disabled,
             selected,
+            indicator,
             backgroundless,
             hoverless,
             frosted,
+            turn,
             hovered,
             fill,
             pressed,
@@ -364,17 +404,30 @@ impl RenderOnce for Button {
                         .path(icons::path(path))
                         .size(px(16.))
                         .flex_none()
-                        .text_color(foreground),
+                        .text_color(foreground)
+                        .with_transformation(Transformation::rotate(radians(turn * TAU))),
                 )
             })
             .when_some(content, |this, content| this.child(content))
+            .children(leading)
             .when_some(label, |this, label| {
                 this.child(
                     div()
                         .min_w_0()
                         .truncate()
-                        .when(trailing.is_some(), |this| this.flex_1())
+                        .when(trailing.is_some() || detail.is_some(), |this| this.flex_1())
                         .child(label),
+                )
+            })
+            .when_some(detail, |this, detail| {
+                this.child(
+                    div()
+                        .flex_none()
+                        .max_w(relative(0.5))
+                        .truncate()
+                        .text_size(theme.text(Text::Label))
+                        .text_color(theme.muted_foreground)
+                        .child(detail),
                 )
             })
             .when_some(trailing, |this, path| {
@@ -384,6 +437,19 @@ impl RenderOnce for Button {
                         .size(px(16.))
                         .flex_none()
                         .text_color(foreground),
+                )
+            })
+            .when(indicator, |this| {
+                let diameter = theme.metrics.pad * 0.375;
+                this.relative().child(
+                    div()
+                        .absolute()
+                        .left(relative(0.5))
+                        .ml(-diameter / 2.)
+                        .bottom(theme.metrics.pad * 0.125)
+                        .size(diameter)
+                        .rounded_full()
+                        .bg(foreground),
                 )
             })
             .when(interactive, |this| {

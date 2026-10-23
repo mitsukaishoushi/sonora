@@ -2,18 +2,24 @@ use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Div, ElementId, Entity, FontWeight, MouseButton, MouseDownEvent, SharedString,
-    Window, div, relative,
+    AnyElement, App, Div, ElementId, Entity, FontWeight, MouseButton, MouseDownEvent, Pixels,
+    SharedString, Window, div, px, relative,
 };
 use i18n::t;
 use music::{Album, Track};
 use state::{Origin, Playback};
 use ui::{
-    ActiveTheme as _, Artwork, Button, ExplicitBadge, LEADING, Pin, Pinnable as _, TableState,
-    Text, upper,
+    ActiveTheme as _, Artwork, Button, ExplicitBadge, LEADING, Pin, Pinnable as _, Skeleton,
+    TableState, Text, upper,
 };
 
 use crate::shared::tracks::{self, TrackSource};
+
+/// How wide the skeleton bars of a pending hero reach, for the title, the meta line and the
+/// row of actions.
+const TITLE_SKELETON: Pixels = px(240.);
+const META_SKELETON: Pixels = px(180.);
+const ACTION_SKELETON: Pixels = px(96.);
 
 /// One copyright line, with a © in front unless the provider already led it with © or ℗.
 pub(crate) fn copyright_notice(text: &str) -> SharedString {
@@ -299,6 +305,7 @@ pub(crate) struct PageHero {
     explicit: bool,
     drag_start: Option<DragStart>,
     pin: Option<Pin>,
+    pending: bool,
 }
 
 impl PageHero {
@@ -316,6 +323,7 @@ impl PageHero {
             explicit: false,
             drag_start: None,
             pin: None,
+            pending: false,
         }
     }
 
@@ -371,6 +379,13 @@ impl PageHero {
         self.explicit = explicit;
         self
     }
+
+    /// Draws the cover, title, meta line and actions as skeletons while the page has nothing
+    /// to fill them with yet. The eyebrow stays, since it names the kind of page.
+    pub(crate) fn pending(mut self, pending: bool) -> Self {
+        self.pending = pending;
+        self
+    }
 }
 
 impl RenderOnce for PageHero {
@@ -380,6 +395,42 @@ impl RenderOnce for PageHero {
         let art = theme.metrics.cover;
         let drag_start = self.drag_start.map(Rc::from);
         let starter = drag_start.clone();
+
+        if self.pending {
+            return div()
+                .id(self.id)
+                .flex()
+                .flex_none()
+                .items_end()
+                .gap_5()
+                .pb_6()
+                .child(
+                    Skeleton::new()
+                        .flex_none()
+                        .size(art)
+                        .rounded(theme.radius * 1.5)
+                        .when(self.circle, |skeleton| skeleton.rounded_full()),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .h(art)
+                        .justify_end()
+                        .gap_3()
+                        .line_height(relative(LEADING))
+                        .children(self.eyebrow.map(|eyebrow| eyebrow_label(eyebrow, cx)))
+                        .child(
+                            Skeleton::new()
+                                .w(TITLE_SKELETON)
+                                .h(theme.text(Text::Display)),
+                        )
+                        .child(Skeleton::new().w(META_SKELETON).h(theme.metrics.pad))
+                        .child(Skeleton::new().w(ACTION_SKELETON).h(theme.metrics.control)),
+                );
+        }
 
         div()
             .id(self.id)

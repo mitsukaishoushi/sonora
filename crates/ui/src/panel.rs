@@ -38,6 +38,8 @@ pub struct Panel {
     reach: Option<Pixels>,
     fill: bool,
     clearance: bool,
+    /// How far above the panel's foot the resize grip ends.
+    grip_bottom: Pixels,
     resize: Option<Resize>,
     children: Vec<AnyElement>,
 }
@@ -56,6 +58,7 @@ impl Panel {
             reach: None,
             fill: false,
             clearance: false,
+            grip_bottom: Pixels::ZERO,
             resize: None,
             children: Vec::new(),
         }
@@ -79,6 +82,13 @@ impl Panel {
 
     pub fn clears_scrollbar(mut self) -> Self {
         self.clearance = true;
+        self
+    }
+
+    /// Ends the resize grip `bottom` above the panel's foot, so chrome floating over the panel's
+    /// lower edge keeps its own pointer instead of the grip's, which is drawn over everything.
+    pub fn grip_above(mut self, bottom: Pixels) -> Self {
+        self.grip_bottom = bottom;
         self
     }
 
@@ -120,6 +130,7 @@ impl RenderOnce for Panel {
             reach,
             fill,
             clearance,
+            grip_bottom,
             resize,
             children,
         } = self;
@@ -135,7 +146,9 @@ impl RenderOnce for Panel {
                 clearance,
                 resize,
             )
+            .bottom(grip_bottom)
         });
+        let handle = handle.map(|handle| deferred(handle).with_priority(GRIP_PRIORITY));
 
         let mut panel = base
             .relative()
@@ -164,19 +177,18 @@ fn grip(
     max: Pixels,
     clearance: bool,
     resize: Resize,
-) -> impl IntoElement {
+) -> Stateful<Div> {
     let dragged = key.clone();
     let clearance = match clearance {
         true => GRIP_CLEARANCE,
         false => Pixels::ZERO,
     };
 
-    let handle = div()
+    div()
         .id("panel-grip")
         .occlude()
         .absolute()
         .top_0()
-        .h_full()
         .w(GRIP)
         .cursor_col_resize()
         .map(|handle| match side {
@@ -207,7 +219,5 @@ fn grip(
                 grab.origin.set(window.mouse_position().x);
                 cx.new(|_| Empty)
             },
-        );
-
-    deferred(handle).with_priority(GRIP_PRIORITY)
+        )
 }

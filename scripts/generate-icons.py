@@ -265,6 +265,12 @@ def main():
         (ROOT / ".github" / "readme-icon.svg").write_text(
             readme_svg(master), encoding="utf-8"
         )
+        (assets / "macos").mkdir(parents=True, exist_ok=True)
+        (assets / "macos" / "sonora.svg").write_text(readme_svg(master), encoding="utf-8")
+        (assets / "windows").mkdir(parents=True, exist_ok=True)
+        (assets / "windows" / "sonora.svg").write_text(
+            rounded_svg(master, 512), encoding="utf-8"
+        )
 
         for pixels in LINUX_SIZES:
             blob = rasterize(round_svg(master, pixels), pixels, workdir, f"l{pixels}")
@@ -312,7 +318,7 @@ def main():
 
     print(
         f"icons: {len(LINUX_SIZES)} linux png, 1 linux svg, 1 icns, 1 ico,"
-        f" {len(TRAY_SIZES) + 1} tray png, 1 readme svg"
+        f" {len(TRAY_SIZES) + 1} tray png, 1 readme svg, 1 macos svg, 1 windows svg"
     )
 
 

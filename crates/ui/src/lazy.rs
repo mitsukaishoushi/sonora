@@ -7,6 +7,7 @@ use gpui::{
 };
 
 type Build = Box<dyn FnOnce(&mut Window, &mut App) -> AnyElement>;
+type Visibility = Box<dyn Fn(bool, &mut Window, &mut App)>;
 
 /// A block inside a scrolling region that builds its content only while the content is on
 /// screen. Off screen it holds the height the content had when it was last built, so the region
@@ -16,6 +17,8 @@ pub struct Lazy {
     id: ElementId,
     style: StyleRefinement,
     build: Option<Build>,
+    revision: u64,
+    visibility: Option<Visibility>,
 }
 
 /// What a lazy block remembers between frames: how tall its content stood and whether it was
@@ -24,6 +27,7 @@ pub struct Lazy {
 struct Seen {
     height: Pixels,
     shown: bool,
+    revision: u64,
 }
 
 impl Lazy {
@@ -36,7 +40,26 @@ impl Lazy {
             id: id.into(),
             style: StyleRefinement::default(),
             build: Some(Box::new(build)),
+            revision: 0,
+            visibility: None,
         }
+    }
+
+    /// Remeasures even an off-screen block when its content or layout changes. Keep the
+    /// revision stable during scrolling and animation so the cached height can be reused.
+    pub fn revision(mut self, revision: u64) -> Self {
+        self.revision = revision;
+        self
+    }
+
+    /// Reports whether the block is visible after layout, including off-screen measurements.
+    /// A block with background work can stop it when outside the scrolling region.
+    pub fn on_visibility(
+        mut self,
+        visibility: impl Fn(bool, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.visibility = Some(Box::new(visibility));
+        self
     }
 }
 
@@ -80,7 +103,11 @@ impl Element for Lazy {
         style.refine(&self.style);
 
         match seen {
-            Some(Seen { height, shown }) if !shown && height > Pixels::ZERO => {
+            Some(Seen {
+                height,
+                shown,
+                revision,
+            }) if !shown && height > Pixels::ZERO && revision == self.revision => {
                 style.size.height = height.into();
                 (window.request_layout(style, [], cx), None)
             }
@@ -105,9 +132,12 @@ impl Element for Lazy {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let shown = window.content_mask().bounds.intersects(&bounds);
+        if let Some(visibility) = &self.visibility {
+            visibility(shown, window, cx);
+        }
 
         if let Some(mut content) = laid.take() {
-            remember(id, bounds.size.height, shown, window);
+            remember(id, bounds.size.height, shown, self.revision, window);
             if !shown {
                 return None;
             }
@@ -115,7 +145,7 @@ impl Element for Lazy {
             return Some(content);
         }
         if !shown {
-            remember(id, bounds.size.height, false, window);
+            remember(id, bounds.size.height, false, self.revision, window);
             return None;
         }
         let build = self.build.take()?;
@@ -130,7 +160,7 @@ impl Element for Lazy {
             cx,
         );
         content.prepaint_at(bounds.origin, window, cx);
-        remember(id, measured.height, true, window);
+        remember(id, measured.height, true, self.revision, window);
         if measured.height != bounds.size.height {
             window.refresh();
         }
@@ -160,9 +190,24 @@ fn seen(id: &GlobalElementId, window: &mut Window) -> Option<Seen> {
     })
 }
 
-fn remember(id: Option<&GlobalElementId>, height: Pixels, shown: bool, window: &mut Window) {
+fn remember(
+    id: Option<&GlobalElementId>,
+    height: Pixels,
+    shown: bool,
+    revision: u64,
+    window: &mut Window,
+) {
     let Some(id) = id else {
         return;
     };
-    window.with_element_state::<Option<Seen>, _>(id, |_, _| ((), Some(Seen { height, shown })));
+    window.with_element_state::<Option<Seen>, _>(id, |_, _| {
+        (
+            (),
+            Some(Seen {
+                height,
+                shown,
+                revision,
+            }),
+        )
+    });
 }

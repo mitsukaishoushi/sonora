@@ -90,8 +90,9 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-The devShell has no `cargo` or `cargo-clippy`; those come from the system profile. The flake
-packages the released binary only, so `nix build` never sees the working tree.
+The devShell has no `cargo` or `cargo-clippy`; those come from the system profile. The flake's
+default package is the released binary, so `nix build` never sees the working tree, while
+`nix build .#sonora-src` compiles it.
 `.cargo/config.toml` links with mold on `x86_64-unknown-linux-gnu`, so mold must be on PATH, or
 build with `RUSTFLAGS=""`. `crates/widevine` compiles C++, so a C++ compiler is needed too.
 

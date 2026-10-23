@@ -33,19 +33,19 @@
         );
 
       release = {
-        version = "0.43.0";
+        version = "0.44.0";
         assets = {
           x86_64-linux = {
             target = "x86_64-unknown-linux-gnu";
-            hash = "sha256-teILLbzaFSdA7pXbq0zypGsAAqdQiaHmurBhGAxa6R0=";
+            hash = "sha256-g0BkMroyZ+JvdLK46Y5yBaxDZLExDXVxJIL97HEl3+M=";
           };
           aarch64-linux = {
             target = "aarch64-unknown-linux-gnu";
-            hash = "sha256-uqNXk74g6spuIVDloxAR7BWPuY1BydsMYml4gSedFx4=";
+            hash = "sha256-HwAC9BSExFpQQl0fe4ltIILFXhZh2ITvn6TGLc1Getw=";
           };
           aarch64-darwin = {
             target = "macos";
-            hash = "sha256-JD2U7hCk7ix58letPTXQuF7hTn3JdTQNufvnq+L8O9w=";
+            hash = "sha256-kUpP4pZjAF2L1rFDwkIAfFz33DnnLcLPQ72a2hEkrVI=";
           };
         };
       };
@@ -98,7 +98,33 @@
             ];
           };
 
-          sonora = pkgs.rustPlatform.buildRustPackage (final: {
+          # The source build uses the toolchain the devShell and CI pin, not whatever rustc
+          # nixpkgs carries that day.
+          rustPlatform =
+            let
+              toolchain =
+                pkgs.rust-bin.stable.${(lib.importTOML ./rust-toolchain.toml).toolchain.channel}.minimal;
+            in
+            pkgs.makeRustPlatform {
+              cargo = toolchain;
+              rustc = toolchain;
+            };
+
+          # Points the Linux binary at its runtime libraries and environment. Both packages run
+          # it, since webkitgtk and the GPU and audio stacks are opened with dlopen and never
+          # show up as link-time dependencies.
+          linuxFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+            patchelf \
+              --set-interpreter "${pkgs.stdenv.cc.bintools.dynamicLinker}" \
+              --add-rpath "${lib.makeLibraryPath (runtimeLibraries ++ [ pkgs.stdenv.cc.cc.lib ])}" \
+              "$out/bin/sonora"
+            wrapProgram "$out/bin/sonora" \
+              --set ALSA_PLUGIN_DIR ${alsaPluginDirectory} \
+              --prefix GIO_EXTRA_MODULES : ${pkgs.glib-networking}/lib/gio/modules \
+              --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : ${gstPluginPath}
+          '';
+
+          sonora-src = rustPlatform.buildRustPackage (final: {
             pname = "sonora";
             inherit ((lib.importTOML (final.src + /Cargo.toml)).workspace.package) version;
 
@@ -107,6 +133,11 @@
               lockFile = final.src + /Cargo.lock;
               allowBuiltinFetchGit = true;
             };
+            cargoBuildFlags = [
+              "--package"
+              "sonora"
+            ];
+            doCheck = false;
 
             nativeBuildInputs =
               with pkgs;
@@ -114,7 +145,7 @@
                 cmake
                 pkg-config
                 (lib.optionals stdenv.hostPlatform.isLinux [
-                  autoPatchelfHook
+                  makeWrapper
                   mold
                 ])
                 (lib.optionals stdenv.hostPlatform.isDarwin [
@@ -142,7 +173,7 @@
                   fontconfig
                   libxcb
                   libxkbcommon
-                  libX11
+                  libx11
                   pipewire
                   stdenv.cc.cc.lib
                   (alsa-lib-with-plugins.override {
@@ -157,21 +188,15 @@
                   (darwinMinVersionHook "10.15")
                 ])
               ];
-            runtimeDependencies =
-              with pkgs;
-              lib.optionals stdenv.hostPlatform.isLinux [
-                vulkan-loader
-                wayland
-              ];
 
             installPhase = ''
               runHook preInstall
 
-              install -Dm755 target/release/sonora "$out/bin/sonora"
+              install -Dm755 "target/${pkgs.stdenv.hostPlatform.rust.cargoShortTarget}/$cargoBuildType/sonora" "$out/bin/sonora"
               ${
                 if pkgs.stdenv.hostPlatform.isDarwin then
                   ''
-                    install -Dm755 target/release/sonora "$out/Applications/Sonora.app/Contents/MacOS/sonora"
+                    install -Dm755 "target/${pkgs.stdenv.hostPlatform.rust.cargoShortTarget}/$cargoBuildType/sonora" "$out/Applications/Sonora.app/Contents/MacOS/sonora"
                     install -Dm444 "$src/assets/macos/sonora.icns" \
                       "$out/Applications/Sonora.app/Contents/Resources/sonora.icns"
 
@@ -211,6 +236,8 @@
 
               runHook postInstall
             '';
+
+            postFixup = linuxFixup;
 
             inherit (sonora-bin) meta;
           });
@@ -277,16 +304,7 @@
                   runHook postInstall
                 '';
 
-            postFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-              patchelf \
-                --set-interpreter "${pkgs.stdenv.cc.bintools.dynamicLinker}" \
-                --add-rpath "${lib.makeLibraryPath (runtimeLibraries ++ [ pkgs.stdenv.cc.cc.lib ])}" \
-                "$out/bin/sonora"
-              wrapProgram "$out/bin/sonora" \
-                --set ALSA_PLUGIN_DIR ${alsaPluginDirectory} \
-                --prefix GIO_EXTRA_MODULES : ${pkgs.glib-networking}/lib/gio/modules \
-                --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : ${gstPluginPath}
-            '';
+            postFixup = linuxFixup;
 
             meta = {
               description = "A native music streaming client, built with Rust and GPUI";
@@ -300,9 +318,12 @@
             };
           };
         in
+        # `default` and `sonora` resolve to the release binary wherever one is published and to
+        # the source build elsewhere. `sonora-src` and `sonora-bin` always mean one or the other.
         {
-          inherit sonora;
-          default = sonora;
+          inherit sonora-src;
+          sonora = sonora-src;
+          default = sonora-src;
         }
         // lib.optionalAttrs (builtins.hasAttr pkgs.stdenv.hostPlatform.system release.assets) {
           inherit sonora-bin;

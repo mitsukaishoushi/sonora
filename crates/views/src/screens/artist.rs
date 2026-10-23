@@ -15,8 +15,8 @@ use state::{AppSettings, ArtistDetail, Origin, Playback, Sonora};
 use ui::ActiveTheme as _;
 use ui::Listing as _;
 use ui::{
-    Button, Card, Deck, MIN_CONTENT, Mode, Picker, Pin, PinKind, Popovers, Popup, Scrollbar,
-    Scroller, Skeleton, TableDelegate, TableEvent, TableState, Text, scrolled, snapped, table,
+    Button, Card, Deck, MIN_CONTENT, Mode, Pending, Picker, Pin, PinKind, Popovers, Popup,
+    Scrollbar, Scroller, TableDelegate, TableEvent, TableState, Text, scrolled, snapped, table,
 };
 
 use crate::chrome::tools;
@@ -51,6 +51,11 @@ impl Tracks for ArtistTracks {
 
     fn is_loading(&self, cx: &App) -> bool {
         self.detail.read(cx).is_loading()
+    }
+
+    /// As many rows as the list shows before it is expanded.
+    fn pending(&self, cx: &App) -> Option<Pending> {
+        self.is_loading(cx).then_some(Pending::Rows(LISTED))
     }
 }
 
@@ -116,6 +121,7 @@ impl ArtistView {
         let shown = Rc::new(Cell::new(LISTED));
         let table = cx.new(|cx| {
             let menu_scrollbar = cx.new(|_| Scrollbar::inset().watching(id));
+            crate::shared::tracks::follow_downloads(cx);
             let source = TrackSource::new(
                 columns,
                 ArtistTracks {
@@ -321,6 +327,7 @@ impl ArtistView {
             .map(|id| Pin::new(PinKind::Artist, id, title.clone()).cover(cover.clone()));
 
         PageHero::new("artist-hero", title)
+            .pending(artist.is_none() && self.detail.read(cx).is_loading())
             .pin(pin)
             .cover(cover)
             .eyebrow(t!("artist-eyebrow"))
@@ -376,10 +383,12 @@ impl ArtistView {
                 true => heart.tint(theme.primary),
                 false => heart,
             }
-            .on_click(move |_, _, cx| match saved {
-                true => Confirm::artists(vec![target.clone()], cx),
-                false => {
-                    library.update(cx, |library, cx| library.toggle_artist(target.clone(), cx));
+            .on_click(move |_, _, cx| {
+                match saved && !Confirm::unstarring(&target.id, cx) {
+                    true => Confirm::artists(vec![target.clone()], cx),
+                    false => {
+                        library.update(cx, |library, cx| library.heart_artist(target.clone(), cx));
+                    }
                 }
             }),
         )
@@ -752,38 +761,6 @@ impl ArtistView {
         .collect()
     }
 
-    fn tracks_loading(&self, cx: &Context<Self>) -> AnyElement {
-        let theme = *cx.theme();
-        let line = || Skeleton::new().w_full().h(theme.metrics.pad);
-
-        div()
-            .w_full()
-            .rounded(theme.radius)
-            .border_1()
-            .border_color(theme.border)
-            .overflow_hidden()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .h(theme.metrics.header)
-                    .px(theme.metrics.pad)
-                    .bg(theme.table_head)
-                    .child(line()),
-            )
-            .children((0..5).map(|_| {
-                div()
-                    .flex()
-                    .items_center()
-                    .h(theme.metrics.row)
-                    .px(theme.metrics.pad)
-                    .border_t_1()
-                    .border_color(theme.table_row_border)
-                    .child(line())
-            }))
-            .into_any_element()
-    }
-
     fn listed(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = *cx.theme();
         let expanded = self.shown.get() > LISTED;
@@ -810,14 +787,12 @@ impl ArtistView {
             .flex()
             .flex_col()
             .gap_2()
-            .child(match self.detail.read(cx).is_loading() {
-                true => self.tracks_loading(cx),
-                false => table(&self.table)
+            .child(
+                table(&self.table)
                     .rounded(theme.radius)
                     .border_1()
-                    .border_color(theme.border)
-                    .into_any_element(),
-            })
+                    .border_color(theme.border),
+            )
             .children(more)
             .into_any_element()
     }
@@ -890,6 +865,16 @@ impl ArtistView {
         Some(div().pt_6().child(card).into_any_element())
     }
 
+    /// Closes the About the artist dialog when it is open, and says whether it was.
+    pub(crate) fn escape(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.about_open {
+            return false;
+        }
+        self.about_open = false;
+        cx.notify();
+        true
+    }
+
     fn about_dialog(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.about_open {
             return None;
@@ -941,6 +926,7 @@ impl ArtistView {
                     let id = id.clone();
                     detail.update(cx, |detail, cx| detail.open(&id, cx));
                 },
+                cx,
             )
             .size_full()
             .into_any_element(),
@@ -1028,6 +1014,7 @@ impl Render for ArtistView {
         });
         let rails = self.recommended(window, &notify, cx);
         let page = Scroller::new("artist-page", &self.scrollbar)
+            .bottom_inset(crate::chrome::Chrome::bottom(cx))
             .px(inset)
             .pt(inset)
             .pb(inset)

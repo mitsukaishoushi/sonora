@@ -6,17 +6,20 @@ use futures::AsyncReadExt as _;
 use futures::channel::oneshot;
 use gpui::prelude::*;
 use gpui::{
-    App, Asset, AssetLogger, Context, Div, ElementId, Entity, Global, Hsla, ImageCache,
-    ImageCacheError, ImageSource, Interactivity, ObjectFit, Pixels, RenderImage, Resource,
-    SharedString, SharedUri, StyleRefinement, Styled, Task, Window, div, img, px, svg,
+    AnyElement, App, Asset, AssetLogger, Bounds, Context, Div, ElementId, Entity, Global,
+    GlobalElementId, Hsla, ImageCache, ImageCacheError, ImageSource, InspectorElementId,
+    Interactivity, LayoutId, ObjectFit, Pixels, Position, RenderImage, Resource, SharedString,
+    SharedUri, Style, StyleRefinement, Styled, Task, Window, div, img, px, svg,
 };
 use image::{
     AnimationDecoder, DynamicImage, Frame, ImageDecoder, ImageFormat, RgbaImage,
     codecs::{gif::GifDecoder, webp::WebPDecoder},
     imageops,
 };
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::panic::Location;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
@@ -26,9 +29,10 @@ const FILE_PREFIX: &str = "file://";
 const FALLBACK_ICON: &str = "icons/music.svg";
 pub(crate) const ROUNDED: Pixels = px(4.);
 /// What the cache trims back to at the least. The budget grows to one screenful of the
-/// largest window a cover was drawn in, so a HiDPI grid never trims what it shows. The
-/// cache is allowed half as much again past its budget while a scroll pulls covers in,
-/// since a trim asks every window to redraw and is worth doing in one batch.
+/// largest window a cover was drawn in, plus the `PREFETCH_REACH` laid out past both of its
+/// edges, so a HiDPI grid never trims what it shows or is about to. The cache is allowed half
+/// as much again past its budget while a scroll pulls covers in, since a trim asks every
+/// window to redraw and is worth doing in one batch.
 const CACHE_BYTES: usize = 16 * 1024 * 1024;
 const CACHE_ITEMS: usize = 256;
 /// The largest edge a cover is decoded at. It sits above a fullscreen cover on a 5K screen at
@@ -51,6 +55,12 @@ const SOFT_SIGMA: f32 = 1.6;
 const SMALL_BYTES: usize = 64 * 1024;
 const BIG_BYTES: usize = 256 * 1024;
 const MAX_PENDING: usize = 8;
+/// How many of the `MAX_PENDING` loads a prefetched cover may take, so a cover on screen always
+/// finds a free one.
+const PREFETCH_PENDING: usize = MAX_PENDING / 2;
+/// How far past each edge of a scrolled region rows are laid out unseen so their covers load
+/// before they scroll in, as a share of the region's length.
+pub const PREFETCH_REACH: f32 = 0.5;
 /// How many covers decode at once. A decode holds the whole source image, so this bounds
 /// the transient memory, and running decodes on their own threads keeps those buffers in a
 /// couple of malloc arenas rather than one per worker thread.
@@ -65,6 +75,11 @@ const REPRIEVE: Duration = Duration::from_millis(250);
 const TINT_ITEMS: usize = 4096;
 
 type ArtworkKey = (Resource, u32);
+
+thread_local! {
+    /// Set while `prefetch` lays out rows that will not be drawn.
+    static PREFETCHING: Cell<bool> = const { Cell::new(false) };
+}
 
 type Job = Box<dyn FnOnce() + Send>;
 
@@ -402,10 +417,11 @@ impl ArtworkCache {
         self.condemned.insert(resource.clone(), cached);
     }
 
-    /// What the cache trims back to: `CACHE_BYTES`, or one screenful of the largest window
-    /// when that is more.
+    /// What the cache trims back to: `CACHE_BYTES`, or one screenful of the largest window and
+    /// its prefetched reach when that is more.
     fn budget(&self) -> usize {
-        CACHE_BYTES.max(self.screen)
+        let reach = (self.screen as f32 * PREFETCH_REACH * 2.) as usize;
+        CACHE_BYTES.max(self.screen + reach)
     }
 
     /// Condemns the least recently drawn covers until the cache is back inside its budget,
@@ -639,9 +655,13 @@ impl ArtworkCache {
             (viewport.width.as_f32() * viewport.height.as_f32() * scale * scale) as usize * 4;
         self.screen = self.screen.max(screen);
 
-        if !self.pending.contains_key(&key) && self.pending.len() >= MAX_PENDING {
+        let room = match PREFETCHING.get() {
+            true => PREFETCH_PENDING,
+            false => MAX_PENDING,
+        };
+        if !self.pending.contains_key(&key) && self.pending.len() >= room {
             self.reap_pending(window, cx);
-            if self.pending.len() >= MAX_PENDING {
+            if self.pending.len() >= room {
                 return None;
             }
         }
@@ -659,6 +679,21 @@ impl ArtworkCache {
         self.pending.remove(&key);
         self.insert(key, value, cx);
         Some(image)
+    }
+
+    /// Whether a cover at `edge` can be drawn without waiting on a load, counting a failed load,
+    /// which draws the placeholder, and a stand-in at a nearby edge.
+    fn holds(&self, resource: &Resource, edge: u32, soft: bool) -> bool {
+        let key = (resource.clone(), edge);
+        if self.items.contains_key(&key) || self.condemned.contains_key(&key) {
+            return true;
+        }
+        match soft {
+            true => self.soft.contains_key(&key),
+            false => self.items.iter().any(|((held, size), cached)| {
+                held == resource && *size >= edge / 2 && cached.value.is_ok()
+            }),
+        }
     }
 
     /// The largest decode the cache holds of the same cover at no less than half of `edge`, to
@@ -759,6 +794,91 @@ pub fn artwork_usage(cx: &App) -> Option<(usize, usize)> {
     ))
 }
 
+/// Lays out `element` without drawing it, so the covers inside start loading before it
+/// scrolls into view. Those loads take at most `PREFETCH_PENDING` of the slots, so a cover
+/// already on screen never waits behind one that is not.
+pub fn prefetch(mut element: AnyElement, window: &mut Window, cx: &mut App) {
+    let outer = PREFETCHING.replace(true);
+    element.request_layout(window, cx);
+    PREFETCHING.set(outer);
+}
+
+/// Rows just past the edge of a list, laid out with `prefetch` while the list is, so their
+/// covers are loading when they scroll in. It takes no room and draws nothing.
+pub struct Prefetch {
+    rows: Vec<AnyElement>,
+}
+
+impl Prefetch {
+    pub fn new(rows: impl IntoIterator<Item = AnyElement>) -> Self {
+        Self {
+            rows: rows.into_iter().collect(),
+        }
+    }
+}
+
+impl IntoElement for Prefetch {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for Prefetch {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        for row in self.rows.drain(..) {
+            prefetch(row, window, cx);
+        }
+        let style = Style {
+            position: Position::Absolute,
+            ..Style::default()
+        };
+
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Self::PrepaintState {
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        _prepaint: &mut Self::PrepaintState,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) {
+    }
+}
+
 fn image_bytes(image: &RenderImage) -> usize {
     (0..image.frame_count())
         .filter_map(|frame| image.as_bytes(frame))
@@ -805,6 +925,7 @@ pub struct Artwork {
     fallback: SharedString,
     accent: bool,
     soft: bool,
+    overlay: bool,
     interactivity: Interactivity,
 }
 
@@ -817,6 +938,7 @@ impl Artwork {
             circle: false,
             radius: None,
             soft: false,
+            overlay: false,
             fallback: FALLBACK_ICON.into(),
             accent: false,
             interactivity: Interactivity::new(),
@@ -853,6 +975,13 @@ impl Artwork {
         self
     }
 
+    /// Draws nothing while the image loads or after it fails, for a cover stacked over another
+    /// that already shows, so neither the skeleton nor the placeholder hides it.
+    pub fn overlay(mut self) -> Self {
+        self.overlay = true;
+        self
+    }
+
     pub fn accent(mut self) -> Self {
         self.accent = true;
         self
@@ -881,6 +1010,7 @@ impl RenderOnce for Artwork {
             fallback,
             accent,
             soft,
+            overlay,
             interactivity,
         } = self;
         let theme = *cx.theme();
@@ -897,7 +1027,10 @@ impl RenderOnce for Artwork {
         };
         let placeholder = {
             let fallback = fallback.clone();
-            move || blank(size, rounded, muted, glyph, fallback.clone()).into_any_element()
+            move || match overlay {
+                true => div().size(size).into_any_element(),
+                false => blank(size, rounded, muted, glyph, fallback.clone()).into_any_element(),
+            }
         };
 
         match url {
@@ -905,6 +1038,13 @@ impl RenderOnce for Artwork {
                 let cache = ArtworkCache::entity(cx);
                 let resource = resource(url);
                 let edge = sample_edge(size, window);
+                if PREFETCHING.get() {
+                    cache.update(cx, |cache, cx| cache.load_at(&resource, edge, window, cx));
+                    return div().size(size).into_any_element();
+                }
+                // Drawn at once rather than after `img`'s loading delay, and under the cover,
+                // so a cover that lands mid-pulse simply covers it.
+                let waiting = !overlay && !cache.read(cx).holds(&resource, edge, soft);
                 let source = ImageSource::Custom(Arc::new({
                     let cache = cache.clone();
                     move |window, cx| {
@@ -932,18 +1072,27 @@ impl RenderOnce for Artwork {
                     }
                 }));
                 refined(
-                    img(source)
-                        .image_cache(&cache)
+                    div()
+                        .relative()
                         .size(size)
-                        .object_fit(ObjectFit::Cover)
-                        .rounded(rounded)
-                        .with_loading(move || {
-                            Skeleton::new()
-                                .size(size)
-                                .rounded(rounded)
-                                .into_any_element()
+                        .when(waiting, |this| {
+                            this.child(
+                                Skeleton::new()
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .size(size)
+                                    .rounded(rounded),
+                            )
                         })
-                        .with_fallback(placeholder),
+                        .child(
+                            img(source)
+                                .image_cache(&cache)
+                                .size(size)
+                                .object_fit(ObjectFit::Cover)
+                                .rounded(rounded)
+                                .with_fallback(placeholder),
+                        ),
                     interactivity,
                 )
                 .into_any_element()

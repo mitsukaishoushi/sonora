@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::actions;
 use gpui::{
@@ -45,8 +46,47 @@ pub const INPUT_CONTEXT: &str = "Input";
 
 const CARET: Pixels = px(2.);
 const CARET_LINES: f32 = 1.25;
+/// Whether the platform has an X11 or Wayland primary selection, which GPUI exposes only on
+/// Linux and FreeBSD.
+const PRIMARY_SELECTION: bool = cfg!(any(target_os = "linux", target_os = "freebsd"));
+
+/// Whether the desktop lets a middle click paste the primary selection. GNOME can switch it off,
+/// and `refresh_primary_paste` keeps this in step with that switch.
+static PRIMARY_PASTE: AtomicBool = AtomicBool::new(true);
 
 type Motion = fn(&str, usize) -> usize;
+
+/// Re-reads GNOME's middle-click paste switch through the settings portal and repaints every
+/// window when it changed. A desktop that does not expose the switch keeps middle-click paste on.
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+pub fn refresh_primary_paste(cx: &mut App) {
+    use gpui::AppContext as _;
+
+    cx.spawn(async move |cx| {
+        let enabled = cx
+            .background_spawn(async {
+                let settings = ashpd::desktop::settings::Settings::new().await.ok()?;
+                settings
+                    .read::<bool>("org.gnome.desktop.interface", "gtk-enable-primary-paste")
+                    .await
+                    .ok()
+            })
+            .await
+            .unwrap_or(true);
+        if PRIMARY_PASTE.swap(enabled, Ordering::Relaxed) != enabled {
+            cx.update(|cx| cx.refresh_windows());
+        }
+    })
+    .detach();
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+pub fn refresh_primary_paste(_cx: &mut App) {}
+
+/// Whether a middle click in a field pastes the primary selection right now.
+fn primary_paste() -> bool {
+    PRIMARY_SELECTION && PRIMARY_PASTE.load(Ordering::Relaxed)
+}
 
 fn clamp_offset(text: &str, offset: usize) -> usize {
     let mut offset = offset.min(text.len());
@@ -189,6 +229,12 @@ pub struct Input {
     blurred: bool,
     clearable: bool,
     masked: bool,
+    /// Whether the text keeps to the field's end rather than its start, as a column of numbers.
+    end: bool,
+    /// The Fluent key of the muted unit drawn after the text inside the field.
+    suffix: Option<SharedString>,
+    /// The keystroke that focuses the field, drawn as keys at its end while it is empty.
+    shortcut: Option<SharedString>,
     content: SharedString,
     selected_range: Range<usize>,
     selection_reversed: bool,
@@ -211,6 +257,9 @@ impl Input {
             blurred: false,
             clearable: false,
             masked: false,
+            end: false,
+            suffix: None,
+            shortcut: None,
             content: SharedString::default(),
             selected_range: 0..0,
             selection_reversed: false,
@@ -254,6 +303,34 @@ impl Input {
 
     pub fn masked(mut self) -> Self {
         self.masked = true;
+        self
+    }
+
+    /// Keeps the text against the field's end, so numbers in fields stacked or set side by side
+    /// line up by their last digit. Text too long for the field starts at its start as usual.
+    pub fn align_end(mut self) -> Self {
+        self.end = true;
+        self
+    }
+
+    /// Draws the Fluent message `key` muted after the text inside the field, as a unit.
+    pub fn suffix(mut self, key: impl Into<SharedString>) -> Self {
+        self.suffix = Some(key.into());
+        self
+    }
+
+    /// Changes the Fluent key of the unit drawn after the text, redrawing only when it differs.
+    pub fn set_suffix(&mut self, key: Option<SharedString>, cx: &mut Context<Self>) {
+        if self.suffix != key {
+            self.suffix = key;
+            cx.notify();
+        }
+    }
+
+    /// Shows `keystroke`, the shortcut that focuses the field, as a row of keys at its end while
+    /// the field is empty. It is spelled as key bindings are, such as `"secondary-f"`.
+    pub fn shortcut(mut self, keystroke: impl Into<SharedString>) -> Self {
+        self.shortcut = Some(keystroke.into());
         self
     }
 
@@ -467,8 +544,29 @@ impl Input {
         let Some(pasted) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
-        let single_line = pasted.replace('\n', " ");
-        self.replace_text_in_range(None, &single_line, window, cx);
+        self.insert_pasted(&pasted, window, cx);
+    }
+
+    /// Inserts the primary selection where a middle click landed, as X11 and Wayland apps do.
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    fn paste_primary(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pasted) = cx.read_from_primary().and_then(|item| item.text()) else {
+            return;
+        };
+        self.selected_word = None;
+        self.move_to(self.offset_for(position), cx);
+        self.insert_pasted(&pasted, window, cx);
+    }
+
+    /// Inserts pasted `text` over the selection, flattening newlines since the field holds one
+    /// line.
+    fn insert_pasted(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.replace_text_in_range(None, &text.replace('\n', " "), window, cx);
     }
 
     fn show_character_palette(
@@ -491,6 +589,8 @@ impl Input {
         let hovered = word_at(&self.content, offset);
         self.selected_range = hovered.start.min(anchor.start)..hovered.end.max(anchor.end);
         self.selection_reversed = offset < anchor.start;
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        self.publish_selection(cx);
         cx.notify();
     }
 
@@ -502,6 +602,12 @@ impl Input {
     ) {
         cx.stop_propagation();
         self.focus(window, cx);
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        if event.button == MouseButton::Middle {
+            self.context_menu = None;
+            self.paste_primary(event.position, window, cx);
+            return;
+        }
         if event.button == MouseButton::Right {
             self.context_menu = Some(event.position);
             window.prevent_default();
@@ -575,7 +681,20 @@ impl Input {
             self.selection_reversed = !self.selection_reversed;
             self.selected_range = self.selected_range.end..self.selected_range.start;
         }
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        self.publish_selection(cx);
         cx.notify();
+    }
+
+    /// Offers the selected text as the primary selection, so a middle click pastes it in other
+    /// apps. A masked field never offers its text.
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    fn publish_selection(&self, cx: &mut Context<Self>) {
+        let range = clamp_range(&self.content, &self.selected_range);
+        if self.masked || range.is_empty() {
+            return;
+        }
+        cx.write_to_primary(ClipboardItem::new_string(self.content[range].to_owned()));
     }
 
     fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {

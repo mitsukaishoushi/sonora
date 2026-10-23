@@ -14,7 +14,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 use webview2_com::{
     AddScriptToExecuteOnDocumentCreatedCompletedHandler, CoTaskMemPWSTR,
     CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
-    GetCookiesCompletedHandler,
+    ExecuteScriptCompletedHandler, GetCookiesCompletedHandler,
 };
 use windows::Win32::Foundation::{E_POINTER, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -153,6 +153,29 @@ impl Window {
         }
     }
 
+    /// Runs `script` in the page, in the world the document-created script runs in. Nothing
+    /// happens before the controller has arrived.
+    pub(crate) fn run(&self, script: &str) {
+        let Some(view) = self
+            .browser
+            .borrow()
+            .as_ref()
+            .map(|browser| browser.view.clone())
+        else {
+            return;
+        };
+        let script = wide(script);
+        let handler = ExecuteScriptCompletedHandler::create(Box::new(|result, _value| {
+            if let Err(error) = result {
+                log::warn!("webview: the page refused a script: {error}");
+            }
+            Ok(())
+        }));
+        if let Err(error) = unsafe { view.ExecuteScript(PCWSTR(script.as_ptr()), &handler) } {
+            log::warn!("webview: cannot run a script in the page: {error}");
+        }
+    }
+
     pub(crate) fn close(&self) {
         if let Some(browser) = self.browser.borrow_mut().take() {
             let _ = unsafe { browser.controller.Close() };
@@ -267,13 +290,17 @@ fn finish_controller(
     }
 
     let view = unsafe { controller.CoreWebView2() }.context("cannot open the sign-in webview")?;
-    let settings = unsafe { view.Settings() }.context("cannot read webview settings")?;
-    let settings = settings
-        .cast::<webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings2>()
-        .context("the installed WebView2 runtime cannot set a user agent")?;
-    let user_agent = browser_user_agent(&settings)?;
-    unsafe { settings.SetUserAgent(PCWSTR(user_agent.as_ptr())) }
-        .context("cannot set the sign-in user agent")?;
+    // A scripted page keeps the runtime's own agent. Google's attestation checks the agent
+    // against the engine, and a rewritten one gets tokens the stream host refuses.
+    if script.is_none() {
+        let settings = unsafe { view.Settings() }.context("cannot read webview settings")?;
+        let settings = settings
+            .cast::<webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings2>()
+            .context("the installed WebView2 runtime cannot set a user agent")?;
+        let user_agent = browser_user_agent(&settings)?;
+        unsafe { settings.SetUserAgent(PCWSTR(user_agent.as_ptr())) }
+            .context("cannot set the sign-in user agent")?;
+    }
     let view2 = view
         .cast::<ICoreWebView2_2>()
         .context("the installed WebView2 runtime cannot read cookies")?;

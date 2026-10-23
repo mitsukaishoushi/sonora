@@ -13,7 +13,7 @@
 use gpui::{App, Context, Entity, Task};
 use music::drm::{self, Offer, Origin};
 
-use crate::{Io, Session, SessionEvent};
+use crate::{Io, Outcome, Session, SessionEvent, Toasts};
 
 /// Google's terms for a downloaded module, as the prompt shows them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,6 +85,12 @@ impl Drm {
 
     pub fn state(&self) -> &CdmState {
         &self.state
+    }
+
+    /// Whether the module in use is a browser's copy Sonora found on its own. That copy can be
+    /// too old for the license server, which is worth telling the user when tracks fail.
+    pub fn borrowed(&self) -> bool {
+        self.state == CdmState::Ready(Origin::Installed)
     }
 
     /// Whether the download under way would replace a module already here, a browser's copy the
@@ -190,8 +196,12 @@ impl Drm {
                     Ok(Err(error)) => {
                         log::warn!("drm: cannot download the widevine module: {error:#}");
                         this.state = this.fall_back(CdmState::Missing);
+                        failed("toast-widevine-download-failed", format!("{error:#}"), cx);
                     }
-                    Err(_) => this.state = this.fall_back(CdmState::Missing),
+                    Err(error) => {
+                        this.state = this.fall_back(CdmState::Missing);
+                        failed("toast-widevine-download-failed", error.to_string(), cx);
+                    }
                 }
                 cx.notify();
             })
@@ -219,9 +229,13 @@ impl Drm {
                     }
                     Ok(Err(error)) => {
                         log::warn!("drm: cannot install the widevine module: {error:#}");
+                        failed("toast-widevine-install-failed", format!("{error:#}"), cx);
                         this.fall_back(CdmState::Missing)
                     }
-                    Err(_) => this.fall_back(CdmState::Missing),
+                    Err(error) => {
+                        failed("toast-widevine-install-failed", error.to_string(), cx);
+                        this.fall_back(CdmState::Missing)
+                    }
                 };
                 cx.notify();
             })
@@ -251,12 +265,16 @@ impl Drm {
                     Ok(Ok(None)) => CdmState::Declined,
                     Ok(Err(error)) => {
                         log::warn!("drm: cannot remove the widevine module: {error:#}");
+                        failed("toast-widevine-remove-failed", format!("{error:#}"), cx);
                         match drm::find() {
                             Some(found) => CdmState::Ready(found.origin),
                             None => CdmState::Declined,
                         }
                     }
-                    Err(_) => CdmState::Declined,
+                    Err(error) => {
+                        failed("toast-widevine-remove-failed", error.to_string(), cx);
+                        CdmState::Declined
+                    }
                 };
                 cx.notify();
             })
@@ -285,4 +303,9 @@ impl Drm {
             .ok();
         }));
     }
+}
+
+/// Shows a failed step the user started, with the error below it.
+fn failed(key: &'static str, error: String, cx: &mut App) {
+    Toasts::with_detail(Outcome::Failed, key, None, error, cx);
 }

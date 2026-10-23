@@ -140,6 +140,7 @@ pub struct Scrollbar {
     always_visible: bool,
     track_inset: Pixels,
     track_top: Pixels,
+    track_bottom: Pixels,
     maximum: Option<Pixels>,
     hover_guard: Option<HoverGuard>,
     scroll_guard: Option<ScrollGuard>,
@@ -161,6 +162,7 @@ impl Scrollbar {
             always_visible: false,
             track_inset: Pixels::ZERO,
             track_top: Pixels::ZERO,
+            track_bottom: Pixels::ZERO,
             maximum: None,
             hover_guard: None,
             scroll_guard: None,
@@ -230,6 +232,18 @@ impl Scrollbar {
 
     pub fn remember_offset(&mut self, offset: Pixels) {
         self.seen = offset;
+    }
+
+    /// Keeps the entire track above an overlaid bottom control without reducing the region's
+    /// scroll viewport. Notifies only when the clearance changes.
+    pub fn set_track_bottom(&mut self, bottom: Pixels, cx: &mut Context<Self>) -> bool {
+        let bottom = bottom.max(Pixels::ZERO);
+        if self.track_bottom == bottom {
+            return false;
+        }
+        self.track_bottom = bottom;
+        cx.notify();
+        true
     }
 
     pub fn nudges(&self) -> u64 {
@@ -565,7 +579,8 @@ impl Render for Scrollbar {
         let theme = *cx.theme();
         let content = viewport + hidden;
         let progress = (offset / hidden).clamp(0., 1.);
-        let track = (viewport - self.track_inset * 2. - self.track_top).max(Pixels::ZERO);
+        let track = (viewport - self.track_inset * 2. - self.track_top - self.track_bottom)
+            .max(Pixels::ZERO);
         let thumb = (track * (viewport / content)).max(MIN_THUMB).min(track);
         let travel = track - thumb;
         let resting = match self.always_visible || self.awake || self.hovered {

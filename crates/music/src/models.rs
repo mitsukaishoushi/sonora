@@ -87,6 +87,8 @@ pub struct Playlist {
     pub blend: bool,
     pub public: bool,
     pub cover: Option<String>,
+    /// How many tracks the playlist holds. Zero also stands for a count the provider does not
+    /// report, as for a Tidal mix, so a screen leaves it out rather than showing it.
     pub track_count: u32,
     pub modified_at: Option<i64>,
 }

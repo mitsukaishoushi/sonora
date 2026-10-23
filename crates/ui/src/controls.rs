@@ -1,7 +1,9 @@
+use std::sync::OnceLock;
+
 use gpui::prelude::*;
 use gpui::{
-    App, Div, Font, FontFallbacks, MouseButton, Pixels, StyleRefinement, Window, WindowControlArea,
-    div, font, px, svg,
+    App, Div, Font, MouseButton, Pixels, StyleRefinement, Window, WindowControlArea, div, font, px,
+    svg,
 };
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use gpui::{CursorStyle, Decorations, ResizeEdge};
@@ -13,8 +15,9 @@ const BUTTON: Pixels = px(20.);
 const GLYPH: Pixels = px(16.);
 const CAPTION_GLYPH: Pixels = px(10.);
 const CAPTION_NUDGE: Pixels = px(1.);
-const CAPTION_FONT: &str = "Segoe Fluent Icons";
-const CAPTION_FONT_FALLBACK: &str = "Segoe MDL2 Assets";
+/// The icon fonts that carry Windows' caption glyphs, newest first. Windows 11 ships both, and
+/// Windows 10 only the second.
+const CAPTION_FONTS: [&str; 2] = ["Segoe Fluent Icons", "Segoe MDL2 Assets"];
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 const RESIZE_EDGE: Pixels = px(5.);
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -179,6 +182,10 @@ impl RenderOnce for WindowControls {
         }
 
         let is_windows = cfg!(target_os = "windows");
+        let caption = match is_windows {
+            true => caption_font(cx),
+            false => None,
+        };
         let mut controls = self
             .base
             .flex()
@@ -223,10 +230,10 @@ impl RenderOnce for WindowControls {
                             })
                         })
                     })
-                    .map(|this| match is_windows {
-                        true => this.child(
+                    .map(|this| match caption.clone() {
+                        Some(caption) => this.child(
                             div()
-                                .font(caption_font())
+                                .font(caption)
                                 .text_size(CAPTION_GLYPH)
                                 .line_height(CAPTION_GLYPH)
                                 .relative()
@@ -240,7 +247,7 @@ impl RenderOnce for WindowControls {
                                 })
                                 .child(control.caption_glyph()),
                         ),
-                        false => this.child(
+                        None => this.child(
                             svg()
                                 .path(icons::path(control.icon()))
                                 .id("glyph")
@@ -272,13 +279,24 @@ impl RenderOnce for WindowControls {
     }
 }
 
-fn caption_font() -> Font {
-    Font {
-        fallbacks: Some(FontFallbacks::from_fonts(vec![
-            CAPTION_FONT_FALLBACK.to_owned(),
-        ])),
-        ..font(CAPTION_FONT)
-    }
+/// The first caption icon font installed on this system, or `None` when there is neither and the
+/// controls draw their SVG icons. GPUI reads a font's fallbacks only once the font itself loads,
+/// so each family is looked up by name. The answer is kept for the rest of the run.
+fn caption_font(cx: &App) -> Option<Font> {
+    static FAMILY: OnceLock<Option<&'static str>> = OnceLock::new();
+    let family = FAMILY.get_or_init(|| {
+        let installed = cx.text_system().all_font_names();
+        let found = CAPTION_FONTS.into_iter().find(|family| {
+            installed
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(family))
+        });
+        if found.is_none() {
+            log::warn!("controls: no caption icon font is installed, drawing the icons instead");
+        }
+        found
+    });
+    family.map(font)
 }
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]

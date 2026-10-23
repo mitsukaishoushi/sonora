@@ -1,15 +1,18 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use gpui::{Context, Entity, Task};
+use gpui::{App, Context, Entity, Task};
 use music::{
     Album, AlbumCatalogue, AlbumDetail, ArtistRef, Contributor, Playlist, PlaylistDetail,
     ReleaseType, SavedArtist, Track,
 };
 use tokio::task::AbortHandle;
 
-use crate::{Io, Library, LibraryEvent, Session, SessionEvent, join, mosaic};
+use crate::{
+    Io, Library, LibraryEvent, Network, Session, SessionEvent, SessionState, Sonora, join, mosaic,
+};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Collection {
     Album,
     Playlist,
@@ -87,7 +90,7 @@ impl Detail {
                     }
                 }
             }
-            SessionEvent::Reconnected => {}
+            SessionEvent::Reconnected | SessionEvent::WentOffline => {}
             SessionEvent::LocalChanged => {
                 if let (Some(kind), Some(id)) = (
                     this.kind,
@@ -103,15 +106,26 @@ impl Detail {
         })
         .detach();
 
+        // A page that opened while the account was still signing back in waits for it. Once the
+        // session settles anywhere but signed in, there is nothing coming to wait for.
+        cx.observe(&session, |this, session, cx| {
+            let restoring = matches!(session.read(cx).state(), SessionState::Restoring);
+            if this.loading && this.task.is_none() && !restoring {
+                this.loading = false;
+                cx.notify();
+            }
+        })
+        .detach();
+
         cx.subscribe(&library, |this, _, event, cx| match event {
             LibraryEvent::PlaylistGone(id) if this.id.as_deref() == Some(id.as_str()) => {
                 this.clear();
                 cx.notify();
             }
-            LibraryEvent::TrackAdded { playlist }
+            LibraryEvent::TrackAdded { playlist } | LibraryEvent::PlaylistChanged(playlist)
                 if this.id.as_deref() == Some(playlist.as_str()) =>
             {
-                this.load(Collection::Playlist, playlist.clone(), cx);
+                this.load(Collection::Playlist, playlist.clone(), false, cx);
             }
             LibraryEvent::TrackDropped { playlist, track }
                 if this.id.as_deref() == Some(playlist.as_str()) =>
@@ -179,6 +193,12 @@ impl Detail {
 
     pub fn id(&self) -> Option<&str> {
         self.id.as_deref()
+    }
+
+    /// Whether the page is an album or a playlist, known from the moment it opens, before its
+    /// header arrives.
+    pub fn kind(&self) -> Option<Collection> {
+        self.kind
     }
 
     pub fn header(&self) -> Option<&Header> {
@@ -277,13 +297,29 @@ impl Detail {
         self.remove_tracks_from_playlist(vec![track_id], cx);
     }
 
+    /// Takes every copy of the named tracks out of the playlist on the page. The library is
+    /// told about each row the page shows of them, so its count and Undo cover every copy.
     pub fn remove_tracks_from_playlist(&mut self, track_ids: Vec<String>, cx: &mut Context<Self>) {
         let Some(playlist_id) = self.id.clone() else {
             log::warn!("detail: cannot remove a track without a playlist");
             return;
         };
+        let named: HashSet<&str> = track_ids.iter().map(String::as_str).collect();
+        let mut rows: Vec<String> = self
+            .tracks
+            .iter()
+            .filter_map(|track| track.id.clone())
+            .filter(|id| named.contains(id.as_str()))
+            .collect();
+        let mut counted: HashSet<String> = rows.iter().cloned().collect();
+        let unseen: Vec<String> = track_ids
+            .iter()
+            .filter(|id| counted.insert((*id).clone()))
+            .cloned()
+            .collect();
+        rows.extend(unseen);
         self.library.update(cx, |library, cx| {
-            library.remove_tracks_from_playlist(playlist_id, track_ids, cx);
+            library.remove_tracks_from_playlist(playlist_id, rows, cx);
         });
     }
 
@@ -300,6 +336,18 @@ impl Detail {
             Collection::Album => self.open_album(&id, cx),
             Collection::Playlist => self.open_playlist(&id, cx),
         }
+    }
+
+    /// Drops the page and fetches it again from the provider, past the catalog cache, so it
+    /// shows its loading state until the new header and rows land.
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        let (Some(kind), Some(id)) = (self.kind, self.id.clone()) else {
+            return;
+        };
+        self.clear();
+        self.id = Some(id.clone());
+        self.kind = Some(kind);
+        self.load(kind, id, true, cx);
     }
 
     pub fn open_album(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -347,7 +395,16 @@ impl Detail {
         self.kind = Some(kind);
         self.header = known;
 
-        let Some(catalog) = self.session.read(cx).catalog(id) else {
+        // With no network, or none allowed, a downloaded page opens from its kept copy.
+        let offline = Network::lost(cx) && !music::is_local_id(id);
+        let catalog = self.session.read(cx).catalog(id).filter(|_| !offline);
+        let Some(catalog) = catalog else {
+            if let Some(kept) = kept(kind, id, cx) {
+                self.adopt(kept, cx);
+            }
+            // Signing back in reopens the page, so until then it reads as loading.
+            let restoring = matches!(self.session.read(cx).state(), SessionState::Restoring);
+            self.loading = restoring && !offline && self.tracks.is_empty();
             cx.notify();
             return true;
         };
@@ -361,11 +418,13 @@ impl Detail {
             return true;
         }
 
-        self.load(kind, id.to_owned(), cx);
+        self.load(kind, id.to_owned(), false, cx);
         true
     }
 
-    fn load(&mut self, kind: Collection, id: String, cx: &mut Context<Self>) {
+    /// Fetches the page from the catalog. A `fresh` load drops the cached page first, and an
+    /// album's rails with it, so the provider is asked again.
+    fn load(&mut self, kind: Collection, id: String, fresh: bool, cx: &mut Context<Self>) {
         let Some(catalog) = self.session.read(cx).catalog(&id) else {
             cx.notify();
             return;
@@ -379,8 +438,19 @@ impl Detail {
             let id = id.clone();
             async move {
                 match kind {
-                    Collection::Album => catalog.album(&id).await.map(Loaded::Album),
-                    Collection::Playlist => catalog.playlist(&id).await.map(Loaded::Playlist),
+                    Collection::Album => {
+                        if fresh {
+                            catalog.invalidate_album(&id).await;
+                            catalog.invalidate_album_catalogue(&id).await;
+                        }
+                        catalog.album(&id).await.map(Loaded::Album)
+                    }
+                    Collection::Playlist => {
+                        if fresh {
+                            catalog.invalidate_playlist(&id).await;
+                        }
+                        catalog.playlist(&id).await.map(Loaded::Playlist)
+                    }
                 }
             }
         });
@@ -394,7 +464,10 @@ impl Detail {
                 this.request = None;
                 match crate::settled(loaded, cx) {
                     Ok(detail) => this.adopt(detail, cx),
-                    Err(reason) => this.error = Some(reason),
+                    Err(reason) => match kept(kind, &id, cx) {
+                        Some(kept) => this.adopt(kept, cx),
+                        None => this.error = Some(reason),
+                    },
                 }
                 cx.notify();
             })
@@ -614,5 +687,19 @@ fn playlist_header(playlist: &Playlist) -> Header {
         owner_name,
         track_count: playlist.track_count,
         cover: playlist.cover.clone(),
+    }
+}
+
+/// The downloaded copy of an album or playlist, which stands in for its page while the provider
+/// is out of reach.
+fn kept(kind: Collection, id: &str, cx: &App) -> Option<Loaded> {
+    let downloads = cx.try_global::<Sonora>()?.downloads.read(cx);
+    match kind {
+        Collection::Album => downloads
+            .album_detail(id)
+            .map(|detail| Loaded::Album(Arc::new(detail))),
+        Collection::Playlist => downloads
+            .playlist_detail(id)
+            .map(|detail| Loaded::Playlist(Arc::new(detail))),
     }
 }

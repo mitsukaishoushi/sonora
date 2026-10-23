@@ -254,7 +254,7 @@ impl AppleClient {
             .build()
             .context("cannot build the apple http client")?;
         let bearer = auth::bearer(&http).await?;
-        let client = Self {
+        let mut client = Self {
             http,
             user_token: user_token.into(),
             bearer: bearer.into(),
@@ -263,7 +263,16 @@ impl AppleClient {
             listings: Arc::default(),
             pinned: Arc::default(),
         };
-        let body = client.get("/me/storefront", &[]).await?;
+        // A kept bearer token Apple has stopped taking is read off the page again, once.
+        let body = match client.get("/me/storefront", &[]).await {
+            Err(error) if format!("{error:#}").contains("answered 401") => {
+                log::info!("apple: the bearer token was turned down, reading a new one");
+                auth::forget_bearer();
+                client.bearer = auth::bearer(&client.http).await?.into();
+                client.get("/me/storefront", &[]).await?
+            }
+            answered => answered?,
+        };
         let answered: wire::Answer = wire::answer(&body);
         let storefront = answered
             .data
@@ -1743,7 +1752,8 @@ impl MusicApi for AppleClient {
     }
 
     /// Removing takes the playlist's own row id rather than the catalog id, so the playlist is
-    /// read first to find which row carries this track.
+    /// read first to find which row carries this track. A row matches on its reporting id too,
+    /// which is the id a song Apple delivered again is listed under.
     async fn remove_track_from_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()> {
         let limit = PAGE.to_string();
         let mut row = None;
@@ -1765,8 +1775,10 @@ impl MusicApi for AppleClient {
                     row.attributes
                         .as_ref()
                         .and_then(|attributes| attributes.play_params.as_ref())
-                        .and_then(|params| params.catalog_id.as_str())
-                        == Some(track_id)
+                        .is_some_and(|params| {
+                            params.catalog_id.as_str() == Some(track_id)
+                                || params.reporting_id.as_str() == Some(track_id)
+                        })
                 })
                 .and_then(|row| row.id.as_str().map(str::to_owned));
             if row.is_some() || outline.data.is_empty() || !outline.next.is_present() {

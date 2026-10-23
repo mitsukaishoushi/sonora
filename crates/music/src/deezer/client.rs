@@ -17,9 +17,9 @@ use tokio::time::Instant;
 use crate::deezer::{decrypt, wire};
 use crate::engine::Loudness;
 use crate::{
-    Album, AlbumCatalogue, AlbumDetail, Artist, ArtistProfile, ArtistRef, HomeFeed, MediaKind,
-    MusicApi, Playlist, PlaylistDetail, SUGGESTIONS, SavedArtist, Track, UserProfile,
-    distinct_covers, escape,
+    Album, AlbumCatalogue, AlbumDetail, Artist, ArtistProfile, ArtistRef, Encoding, HomeFeed,
+    MediaKind, MusicApi, Offer, Playlist, PlaylistDetail, Quality, SUGGESTIONS, SavedArtist, Track,
+    UserProfile, distinct_covers, escape,
 };
 
 const GATEWAY: &str = "https://www.deezer.com/ajax/gw-light.php";
@@ -28,6 +28,28 @@ const MEDIA: &str = "https://media.deezer.com/v1/get_url";
 
 /// The audio formats `get_url` knows, best first. The license decides which ones come back.
 const FORMATS: [&str; 3] = ["FLAC", "MP3_320", "MP3_128"];
+
+/// The levels Deezer serves, best first, one for each of `FORMATS`.
+pub(crate) const QUALITIES: &[Offer] = &[
+    Offer {
+        quality: Quality::Lossless,
+        encoding: Encoding::Flac {
+            depth: 16,
+            rate: 44_100,
+        },
+        up_to: false,
+    },
+    Offer {
+        quality: Quality::High,
+        encoding: Encoding::Mp3 { kbps: 320 },
+        up_to: false,
+    },
+    Offer {
+        quality: Quality::Normal,
+        encoding: Encoding::Mp3 { kbps: 128 },
+        up_to: false,
+    },
+];
 
 /// The one format user-uploaded files are served as.
 const UPLOAD_FORMAT: &str = "MP3_MISC";
@@ -81,6 +103,9 @@ struct Session {
     /// The `checkForm` token every later gateway call carries.
     api_token: String,
     license_token: String,
+    /// Where in `FORMATS` the best format the plan covers sits. It stays 0, every format, when
+    /// the account says nothing about its plan.
+    plan: usize,
 }
 
 #[derive(Clone)]
@@ -107,6 +132,9 @@ struct Inner {
 pub struct Opened {
     pub response: reqwest::Response,
     pub key: decrypt::Secret,
+    /// The id the stream belongs to, which differs from the one asked for when Deezer
+    /// substitutes another release of the same recording. The key is derived from it.
+    pub effective_id: String,
     pub duration: Option<Duration>,
     /// The gateway's `GAIN`. Despite the name it is the track's integrated loudness rather than
     /// an adjustment, and it lands within about a decibel of Apple's LUFS for the same
@@ -118,6 +146,27 @@ impl DeezerClient {
     /// Signs in with an `arl` cookie: fetches the user data (which validates the cookie) and
     /// the stream secret. An invalid or expired arl answers a user id of 0.
     pub async fn connect(arl: &str) -> Result<Self> {
+        let client = Self::unopened(arl)?;
+        client.ping().await?;
+        client.refresh().await?;
+        if client.inner.session.read().await.profile.id.is_empty() {
+            bail!("the arl was refused; sign in to deezer.com again");
+        }
+        let secret = decrypt::secret(&client.inner.http).await;
+        // set once here, before the client is cloned anywhere
+        client.inner.secret.set(secret).ok();
+        Ok(client)
+    }
+
+    /// A client for `arl` that has not reached Deezer, holding the last known stream secret. It
+    /// can derive the key of a downloaded track and do nothing else until it connects.
+    pub fn offline(arl: &str) -> Result<Self> {
+        let client = Self::unopened(arl)?;
+        client.inner.secret.set(decrypt::FALLBACK).ok();
+        Ok(client)
+    }
+
+    fn unopened(arl: &str) -> Result<Self> {
         let http = reqwest::Client::builder()
             .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0")
             .build()
@@ -135,20 +184,13 @@ impl DeezerClient {
                     },
                     api_token: String::new(),
                     license_token: String::new(),
+                    plan: 0,
                 }),
                 secret: OnceLock::new(),
                 slot: Mutex::new(Instant::now()),
                 portraits: Mutex::new(HashMap::new()),
             }),
         };
-        client.ping().await?;
-        client.refresh().await?;
-        if client.inner.session.read().await.profile.id.is_empty() {
-            bail!("the arl was refused; sign in to deezer.com again");
-        }
-        let secret = decrypt::secret(&client.inner.http).await;
-        // set once here, before the client is cloned anywhere
-        client.inner.secret.set(secret).ok();
         Ok(client)
     }
 
@@ -188,11 +230,21 @@ impl DeezerClient {
         let license_token = wire::text(&user["OPTIONS"], &["license_token"])
             .unwrap_or_default()
             .to_owned();
+        let plan = plan(&user["OPTIONS"]);
         let mut session = self.inner.session.write().await;
         session.profile = profile;
         session.api_token = api_token;
         session.license_token = license_token;
+        session.plan = plan;
         Ok(())
+    }
+
+    /// The format a track is first offered in at `quality` on this account's plan, which is the
+    /// one it streams as unless the track lacks it.
+    pub async fn served(&self, quality: Quality) -> &'static str {
+        let plan = self.inner.session.read().await.plan;
+        let first = FORMATS.len() - formats_from(quality).len();
+        FORMATS[first.max(plan).min(FORMATS.len() - 1)]
     }
 
     async fn user_id(&self) -> String {
@@ -430,9 +482,9 @@ impl DeezerClient {
         }
     }
 
-    /// Opens the audio of a track: track token, then a stream url from `get_url`, then the
-    /// GET itself.
-    pub async fn open_stream(&self, track_id: &str) -> Result<Opened> {
+    /// Opens the audio of a track at `quality`, or the best below it the license covers: track
+    /// token, then a stream url from `get_url`, then the GET itself.
+    pub async fn open_stream(&self, track_id: &str, quality: Quality) -> Result<Opened> {
         let data = self.track_data(track_id).await?;
         let effective_id = wire::id(&data["SNG_ID"])
             .with_context(|| format!("the deezer track {track_id} names no id"))?;
@@ -450,7 +502,7 @@ impl DeezerClient {
         let license = self.inner.session.read().await.license_token.clone();
         let formats: &[&str] = match effective_id.starts_with('-') {
             true => &[UPLOAD_FORMAT],
-            false => &FORMATS,
+            false => formats_from(quality),
         };
         let mut last = anyhow::anyhow!("no format was offered");
         for format in formats {
@@ -466,11 +518,11 @@ impl DeezerClient {
                         .context("cannot stream the deezer track")?
                         .error_for_status()
                         .context("the deezer cdn refused the stream")?;
-                    let secret = self.inner.secret.get().copied().unwrap_or_default();
-                    let key = decrypt::track_key(&effective_id, &secret);
+                    let key = self.track_key(&effective_id);
                     return Ok(Opened {
                         response,
                         key,
+                        effective_id,
                         duration,
                         loudness,
                     });
@@ -480,6 +532,12 @@ impl DeezerClient {
             }
         }
         Err(last.context("the deezer track has no playable stream"))
+    }
+
+    /// The Blowfish key of the stream with id `effective_id`, which needs nothing from the network.
+    pub fn track_key(&self, effective_id: &str) -> decrypt::Secret {
+        let secret = self.inner.secret.get().copied().unwrap_or_default();
+        decrypt::track_key(effective_id, &secret)
     }
 
     /// One `get_url` attempt for one format. None when the license does not cover it.
@@ -982,4 +1040,36 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Where in `FORMATS` the best format a plan covers sits, from the `OPTIONS` of
+/// `deezer.getUserData`. A level the options do not mention counts as covered, so an account
+/// that says nothing about its plan is asked for every format.
+fn plan(options: &Value) -> usize {
+    let covers = |keys: [&str; 2]| {
+        let flags = keys
+            .iter()
+            .filter_map(|key| options.get(key))
+            .filter_map(|value| value.as_bool().or_else(|| value.as_u64().map(|on| on != 0)))
+            .collect::<Vec<_>>();
+        flags.is_empty() || flags.contains(&true)
+    };
+    match (
+        covers(["web_lossless", "mobile_lossless"]),
+        covers(["web_hq", "mobile_hq"]),
+    ) {
+        (true, _) => 0,
+        (false, true) => 1,
+        (false, false) => 2,
+    }
+}
+
+/// The formats to try for a level, from its own down to the lowest.
+fn formats_from(quality: Quality) -> &'static [&'static str] {
+    let first = match quality.within(QUALITIES) {
+        Quality::HiRes | Quality::Lossless => 0,
+        Quality::High => 1,
+        Quality::Normal | Quality::Low => 2,
+    };
+    &FORMATS[first..]
 }

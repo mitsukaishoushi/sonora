@@ -1,7 +1,10 @@
 use gpui::prelude::*;
-use gpui::{App, Bounds, Div, Pixels, Point, SharedString, StyleRefinement, Window, div, px};
+use gpui::{
+    App, Bounds, Div, Pixels, Point, SharedString, StyleRefinement, Svg, Window, div, px, svg,
+};
 
 use crate::artwork::{Artwork, Avatar};
+use crate::metrics::Text;
 use crate::theme::ActiveTheme as _;
 
 const CHIP: Pixels = px(240.);
@@ -41,6 +44,18 @@ pub fn drop_marker(edge: Edge, cx: &App) -> Div {
         Edge::Above => line.top_0(),
         Edge::Below => line.bottom_0(),
     }
+}
+
+/// The dotted handle at the start of a row that can be dragged to a new place. It only marks the
+/// row, so the caller wires the drag itself.
+pub fn grip(cx: &App) -> Svg {
+    let theme = cx.theme();
+
+    svg()
+        .path(icons::path("icons/grip-vertical.svg"))
+        .flex_none()
+        .size(theme.text(Text::Body))
+        .text_color(theme.muted_foreground)
 }
 
 #[derive(IntoElement)]

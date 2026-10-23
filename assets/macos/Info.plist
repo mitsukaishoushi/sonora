@@ -32,6 +32,22 @@
 				<string>spotify</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Deezer link</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>deezer</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>TIDAL link</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>tidal</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>

@@ -4,7 +4,6 @@ use gpui::{
 };
 
 use crate::label::eyebrow;
-use crate::separator::Separator;
 use crate::theme::ActiveTheme as _;
 
 #[derive(IntoElement)]
@@ -14,6 +13,9 @@ pub struct InfoCard {
     children: Vec<AnyElement>,
     borderless: bool,
     stretch: bool,
+    plain: bool,
+    untitled: bool,
+    flush: bool,
 }
 
 impl InfoCard {
@@ -24,6 +26,9 @@ impl InfoCard {
             children: Vec::new(),
             borderless: false,
             stretch: false,
+            plain: false,
+            untitled: false,
+            flush: false,
         }
     }
 
@@ -34,6 +39,26 @@ impl InfoCard {
 
     pub fn stretch(mut self) -> Self {
         self.stretch = true;
+        self
+    }
+
+    /// Lays the title and the content out as the card does, with no frame, fill or inset around
+    /// them, for a page that separates its parts by space alone.
+    pub fn plain(mut self) -> Self {
+        self.plain = true;
+        self
+    }
+
+    /// Leaves the eyebrow title out, for a card whose heading sits outside it or that needs none.
+    pub fn untitled(mut self) -> Self {
+        self.untitled = true;
+        self
+    }
+
+    /// Drops the inset and the gap between children for a thin band above and below, so rows that
+    /// pad themselves run edge to edge and read as one surface.
+    pub fn flush(mut self) -> Self {
+        self.flush = true;
         self
     }
 }
@@ -64,6 +89,9 @@ impl RenderOnce for InfoCard {
             children,
             borderless,
             stretch,
+            plain,
+            untitled,
+            flush,
         } = self;
 
         let theme = *cx.theme();
@@ -75,21 +103,17 @@ impl RenderOnce for InfoCard {
             .min_w_0()
             .overflow_hidden()
             .when(stretch, |this| this.h_full())
-            .gap_4()
-            .p_5()
-            .rounded(theme.radius)
-            .when(!borderless, |this| {
-                this.border_1().border_color(theme.border)
+            .when(!flush, |this| this.gap_4())
+            .when(flush, |this| this.py_1())
+            .when(!plain, |this| {
+                this.when(!flush, |this| this.p_5())
+                    .rounded(theme.radius)
+                    .bg(theme.secondary.opacity(0.45))
+                    .when(!borderless, |this| {
+                        this.border_1().border_color(theme.border)
+                    })
             })
-            .bg(theme.secondary.opacity(0.45))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(eyebrow(title, cx))
-                    .child(Separator::horizontal().flex_1()),
-            )
+            .when(!untitled, |this| this.child(eyebrow(title, cx)))
             .children(children);
 
         card.style().refine(&overrides);

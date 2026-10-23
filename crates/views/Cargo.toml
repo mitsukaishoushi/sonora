@@ -15,6 +15,10 @@ router.workspace = true
 ui.workspace = true
 state.workspace = true
 log.workspace = true
+open.workspace = true
+dirs.workspace = true
+[dev-dependencies]
+gpui_platform.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle.workspace = true

@@ -26,22 +26,51 @@ const TRUNCATED: u32 = 500;
 const TRUSTED: u32 = 25;
 
 pub fn rank(query: &LyricsQuery, hits: Vec<LyricsHit>) -> Vec<LyricsHit> {
-    let mut scored: Vec<(i64, LyricsHit)> = hits
+    rank_with_priority(query, hits, &[])
+}
+
+/// Ranks hits best first and removes duplicates. Word-by-word beats line-synced, which beats
+/// plain or cut-short lyrics. Within one of those kinds the source earlier in `priority` wins,
+/// and the match score settles the rest. Sources missing from `priority` come after the rest.
+pub fn rank_with_priority(
+    query: &LyricsQuery,
+    hits: Vec<LyricsHit>,
+    priority: &[String],
+) -> Vec<LyricsHit> {
+    let position = |source: &str| {
+        priority
+            .iter()
+            .position(|name| name == source)
+            .unwrap_or(priority.len())
+    };
+    let mut scored: Vec<(u8, usize, i64, LyricsHit)> = hits
         .into_iter()
         .filter(|hit| eligible(query, hit))
-        .map(|hit| (score(query, &hit), hit))
+        .map(|hit| {
+            (
+                grade(query, &hit.lyrics),
+                position(hit.source),
+                score(query, &hit),
+                hit,
+            )
+        })
         .collect();
-    scored.sort_by(|(left_score, left), (right_score, right)| {
-        right_score
-            .cmp(left_score)
-            .then_with(|| left.source.cmp(right.source))
-            .then_with(|| left.title.cmp(&right.title))
-    });
+    scored.sort_by(
+        |(left_grade, left_place, left_score, left),
+         (right_grade, right_place, right_score, right)| {
+            right_grade
+                .cmp(left_grade)
+                .then_with(|| left_place.cmp(right_place))
+                .then_with(|| right_score.cmp(left_score))
+                .then_with(|| left.source.cmp(right.source))
+                .then_with(|| left.title.cmp(&right.title))
+        },
+    );
 
     let mut seen = HashSet::new();
     scored
         .into_iter()
-        .map(|(_, hit)| hit)
+        .map(|(_, _, _, hit)| hit)
         .filter(|hit| seen.insert(fingerprint(&hit.lyrics)))
         .collect()
 }
@@ -125,6 +154,21 @@ pub fn score(query: &LyricsQuery, hit: &LyricsHit) -> i64 {
         score -= i64::from(TRUNCATED);
     }
     score
+}
+
+/// What kind of lyrics a sheet is, for ranking: 3 word-by-word, 2 line-synced, 1 plain. A sheet
+/// that ends well before the track does counts as 0 whatever its timing.
+fn grade(query: &LyricsQuery, lyrics: &Lyrics) -> u8 {
+    match (
+        truncated(lyrics, query.duration),
+        lyrics.worded(),
+        lyrics.synced(),
+    ) {
+        (true, _, _) => 0,
+        (false, true, _) => 3,
+        (false, false, true) => 2,
+        (false, false, false) => 1,
+    }
 }
 
 fn truncated(lyrics: &Lyrics, duration: Duration) -> bool {

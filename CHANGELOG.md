@@ -31,6 +31,249 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Position and size are remembered, and scrolling over the cover adjusts volume.
 - Open an always-on-top album-cover mini player from Now Playing or with Ctrl+Shift+M.
   Drag the cover to move it, hover for playback controls, and press Escape to return to Sonora.
+## [0.44.1] - 2026-10-22
+
+### Added
+
+- Offline mode in Settings → Storage keeps Sonora to what you downloaded. Your library lists only
+  downloaded songs, albums, playlists and the artists on them, and a page with nothing
+  downloaded says you are offline, with a Go online button that turns the mode off. Turning it
+  on stops streaming, downloads and lyrics lookups, and a downloaded song keeps playing. It
+  stays on across restarts, and Sonora signs in again once you go online.
+- Sonora keeps your previous preferences in `sonora.backup.json` beside `settings.json` each
+  time you change them, so you can get them back if something goes wrong.
+
+### Changed
+
+- Every language Sonora ships is now translated in full, so downloads, the equalizer, Jam,
+  scrobbling and the newer settings no longer show up in English.
+- The download mark beside a song sits on a filled disc, and its ring fades once the download
+  lands. The heart of a song you have not saved is dimmed to match.
+- Sort and column menus only offer columns the list has something in, so an Apple Music
+  playlist no longer offers to sort by a date added it does not have.
+- Apple Music signs in about a second after launch instead of taking up to a minute, because
+  Sonora now keeps the token it needs between launches.
+
+### Fixed
+
+- Saving preferences no longer risks leaving `settings.json` empty or cut short if Sonora closes
+  during the save. If the file is already empty, changing a preference saves it again.
+- Songs that cannot play right now, such as Apple Music downloads in offline mode, are greyed
+  out and say why when you point at them. Picking one no longer swaps your queue while the
+  previous song keeps playing.
+- Album and playlist pages opened while Sonora is still signing in, and your library in offline
+  mode, show placeholders while they load instead of an empty page or No matches.
+- The player bar previews in Settings match the real player bar again, with square covers and
+  the centered layout's scrubber.
+
+## [0.44.0] - 2026-10-22
+
+### Added
+
+- Download songs, albums and playlists from Spotify, YouTube Music, Tidal, Deezer, Apple Music
+  and your Subsonic server with the button beside the heart on album and playlist pages, or from
+  any right-click menu. A ring beside each song shows how far its download has got. Downloads
+  play with no connection at all, except Apple Music's, which start at once but still need a
+  connection to play, and Sonora tells you so if you try without one. A Downloaded filter on every library page shows only what you saved.
+- Sonora keeps the tracks you play from YouTube Music, Tidal, Deezer, Apple Music and your
+  Subsonic server, up to 2 GB or whatever you set under Cache size, plus 1 GB from Spotify, so
+  playing one again starts at once and downloads nothing. Downloads and kept tracks are locked to
+  your computer and no other player can open them. Apple Music and Spotify still check your
+  subscription each time a kept track plays. Turn it off with Keep played tracks in Settings →
+  Playback, which also deletes them.
+- A refresh button beside Back and Forward, or Ctrl+R (Cmd+R on macOS), loads the page you are
+  on again from your server, so changes made in another app show up without restarting Sonora.
+  The page shows its loading state until the fresh data arrives. Settings and search have no
+  refresh button, since there is nothing on them to reload.
+- The library, history, artist, genre and profile pages show placeholder rows and cards while
+  they load, the way album pages already did.
+- With Blur UI on, pages, lyrics, the queue and pinned items scroll beneath a frosted player bar.
+  You can turn it off, and choose a Classic, Compact or Centered layout, in Settings → Appearance
+  → Player bar. Centered puts the cover and playback buttons on the left, track details in the
+  middle and a shorter progress bar below.
+- You can pick a streaming quality for Tidal, Deezer, Spotify, YouTube Music and Apple Music in
+  Settings → Playback → Streaming. Each level says what it streams as. Go as low as 48 kbps to
+  save data, or choose Hi-res on Tidal for 24-bit FLAC. When your plan or a track has nothing at
+  that level, Sonora plays the next one down.
+- With a Subsonic or Navidrome server, you can pick the format and the highest bitrate tracks
+  stream at in Settings → Playback → Streaming. MP3, Opus or AAC at 128 kbps uses far less
+  data than lossless files on a metered connection.
+- You can rank your lyrics sources by dragging them in Settings → Lyrics → Lyrics sources, and
+  Sonora shows the lyrics of the highest one that has them. Word-by-word lyrics still come before
+  line-synced ones, and line-synced before plain text, whichever source they come from.
+- While you are signed in to Spotify, Sonora shows up in Spotify's device list, so your phone can
+  pause, skip, seek, change the volume and start music in Sonora. Turn it off with Show as a
+  Spotify device in Settings → Playback.
+- A devices button in the player bar moves playback between Sonora and your other Spotify
+  devices. While another device plays, the player bar and lyrics follow its song, and Sonora's
+  controls and the songs you pick play there, the way Spotify's own apps do.
+- Settings → Discord can hide Sonora's status while Spotify Connect plays, for when Discord
+  already shows Spotify's own.
+- While Show as a Spotify device is on, a song you like or unlike in Spotify's other apps
+  updates its heart in Sonora right away, without a restart.
+- While Show as a Spotify device is on, pick Join a Jam in the devices menu, paste a friend's
+  link and confirm to join. A strip above the player bar shows who is in the Jam. Click their
+  faces to see everyone and open their profiles.
+- The devices menu can start a Jam, copy its link to share, and end it. Starting one shows a
+  code others can scan to join. As host you can remove people from the list.
+- You can undo clearing the queue or removing songs from it. Press Undo on the toast that
+  appears.
+- Adding a whole album, playlist or artist to the queue shows that it is on its way, and
+  queueing several selected songs tells you how many went in.
+- Sonora tells you when the sleep timer ends, when a radio cannot start, and when a file you
+  opened with it cannot be played.
+- You can undo taking songs, albums or artists out of your favorites or library, removing
+  songs from a playlist, removing a playlist from your library, and unpinning. Press Undo on the
+  toast that appears.
+- You can undo removing a play from your history or a music folder.
+- Copy link tells you it worked. Where there is no link to copy, the entry is greyed out and
+  says why.
+- Sonora tells you when a library scan you started has finished.
+- On macOS, you can move back and forward through history by swiping left or right with two
+  or three fingers, depending on your gesture preferences.
+- Choose your audio output device in Settings → Playback → Devices. Sonora remembers it, plays on
+  your system's default while it is disconnected, forgets it if it stops working, and shows the
+  sample rate and buffer size it plays at, with a shortcut to your system's audio settings.
+- On Linux, pick the sample rate Sonora plays at in Settings → Playback → Devices, from 32 kHz up
+  to 192 kHz, with the − and + buttons beside it. Only rates your device offers are stepped through.
+- Pick the buffer size Sonora hands your audio device, from 128 to 4096 frames, the same way. A
+  bigger buffer stops crackles on a busy system, and a smaller one makes pause react faster.
+- Tidal as a provider: sign in with a code on link.tidal.com, then play your favorites,
+  playlists, mixes and search in up to 24-bit FLAC, whatever your plan includes.
+- Navidrome and other Subsonic servers are a lyrics provider, so the lyrics a server holds, such
+  as ones embedded in the files, show for its tracks.
+- On Linux, Direct to hardware in the output picker plays straight to a sound card, past PipeWire
+  or PulseAudio, for bit-perfect output.
+- The equalizer is now fully parametric, on its own screen: shape up to 20 filters of eight
+  kinds, keep several named profiles, and import an AutoEQ or Equalizer APO profile for your
+  headphones from a file or the clipboard. You can export a profile the same way.
+- The equalizer screen draws your filters' curve, with the preamp as a line across it. Drag a
+  filter to move it, scroll over it to make it wider or narrower, double-click to add one and
+  right-click to remove it. When the sound clips, the screen says by how much and can lower the
+  preamp for you.
+- The equalizer screen shows the spectrum of the music behind the curve, as it is before the
+  equalizer, so you can see what you are shaping. Its scale on the right reads in dBFS.
+- Give your headphones, DAC or speakers their own sound with device rules on the equalizer
+  screen. When Sonora starts playing on that output, the equalizer switches to the preset or
+  profile its rule names, and one rule can cover every other device.
+- The equalizer screen can show the signal path: the track's format, what Sonora does to the
+  sound, what it sends to your device, and whether that is bit-perfect or why not.
+- Undo and redo your equalizer edits with the buttons next to the profile, or with Ctrl+Z and
+  Ctrl+Shift+Z.
+- Switch the equalizer's preset or profile straight from Settings → Sound. Each one shows a
+  small drawing of its curve before its name.
+- Each equalizer filter sits on one line with its switch, type, frequency, gain and Q. Point at
+  a filter and its dot lights up on the graph, and the filter you pick on the graph is marked
+  in the list.
+- Bass and Treble sliders in the equalizer's Simple mode turn the low or high end up or down by
+  as much as 12 dB on top of any preset or profile, without changing it. Sonora lowers the level
+  to make room, so a boost never clips.
+- New themes: Catppuccin (Latte, Frappé, Macchiato and Mocha), Rosé Pine (Main, Moon and Dawn),
+  Gruvbox (Dark, Dark Hard, Light and Light Hard), Solarized (Dark and Light), Nord and Dracula.
+  Pick one in Settings → Appearance.
+- Your own themes can come in variants. Put the theme files in a folder inside the themes
+  folder and they show up as one theme with a variant for each file.
+- Sonora now opens Apple Music, YouTube Music, Deezer and Tidal links as well as Spotify ones,
+  including Deezer's and Spotify's short links. A link to a service you are signed in to but not
+  using switches to that service first. Sonora also handles `deezer://` and `tidal://` links, so
+  "Open in app" on those websites can open Sonora.
+- Opening a Spotify Jam link asks whether to join the Jam, even when it starts Sonora.
+- A toast follows each album, playlist or set of songs you download, shows how far it has got
+  and says when it is done or what failed. Dismiss it to cancel the download.
+
+### Changed
+
+- Open lyrics, album grids and long text cost less to draw, so scrolling keeps up with high
+  refresh rate screens more often. The equalizer page redraws about half as often while music
+  plays.
+- The explicit filter on track lists now hides explicit songs instead of showing only them.
+- Active shuffle and repeat show a dot beneath their icons in the player bar and fullscreen,
+  so their state is visible without relying on color alone.
+- Adaptive theme is off by default; saved preferences are preserved.
+- Settings open on General the first time.
+- Ambient motion remains visible but disabled when Ambient background is off, keeping its
+  saved choice for when the background is enabled again.
+- The setting that caps the frame rate while Sonora is in the background now lists plain FPS
+  values.
+- The Midnight, Forest, Ocean, Rose, Lavender and Amber themes are no longer built in. If you
+  used one, Sonora saved it to your themes folder and keeps it selected, so nothing changes. The
+  others can be copied from `themes/legacy` in Sonora's repository.
+- Settings are regrouped into six tabs under the search field: General, Providers, Appearance,
+  Lyrics, Playback and Integrations. The search finds any setting by name and takes you to it.
+  Themes, icon packs, corners, the visualizer and streaming quality are picked from cards that
+  show what you get.
+- The equalizer, lyrics sources and music folders each have a page of their own inside
+  settings, with a link back to the page they open from.
+- With YouTube Music Premium, songs stream at 256 kbps instead of 128 kbps.
+- An equalizer preset that boosts no longer distorts loud passages. Sonora lowers the level by
+  the curve's highest boost, so the balance you chose is what you hear.
+- The Prefer local lyrics switch is gone. Lyrics in a file's own tags now compete with the
+  online providers, so synced lyrics found online beat plain ones in the file. Rank Local first
+  to have it win when both are equally good.
+- Toasts have a new look. New ones pile up in front of older ones, and pointing at the pile
+  spreads it out and keeps every toast on screen until you move away. Drag a toast to the right
+  to dismiss it.
+- Sonora now plays at your device's own sample rate and converts each track to it with the
+  higher-quality ardftsrc resampler, rather than switching the device's rate between tracks.
+- When Apple Music tracks keep failing because the Widevine module Sonora found in your browser
+  is out of date, Sonora says so and offers a button to the settings where you can download
+  Google's copy.
+- Covers in album grids, song lists and the queue start loading half a screen before they scroll
+  into view, and a pulsing placeholder shows right away while one is still on its way.
+- On Linux, the output picker lists your system's real outputs by the names your desktop gives
+  them, and the one you choose is where Sonora plays. An output you picked before goes back to
+  System default.
+
+### Fixed
+
+- A Spotify song you skip to, or seek back to the start of, now plays from the start instead of
+  sometimes picking up seconds in.
+- YouTube Music songs play to the end again instead of skipping after about a minute. YouTube
+  stopped serving most songs to the guest stream and now wants a token for each song.
+- While controlling another Spotify device, the volume slider follows that device and responds
+  immediately to changes. Fullscreen shows its album art and hides the local audio visualizer.
+- Spotify liked songs and saved albums now load for accounts with hundreds of playlists, instead
+  of failing at startup while Sonora read every playlist at once.
+- On macOS, the fullscreen player's controls hide again once you stop moving the pointer. A hand
+  resting on the trackpad, or the pointer leaving the window over the seek bar, no longer keeps
+  them on screen.
+- Translucent menus and the player bar use a denser surface to keep text and controls readable
+  over bright artwork underneath.
+- Opening or resizing a sidebar no longer changes the player bar's responsive layout. It
+  follows the width of the whole window.
+- Low-bitrate HE-AAC files, in your local library or on a Subsonic server, play with their full
+  sound. They used to play muffled, with everything above about 11 kHz missing.
+- When the service you last used cannot sign back in at launch, Sonora switches to another
+  service you are connected to, or to guest mode, and tells you, instead of sending you back to
+  the sign-in page.
+- The minimize, maximize and close buttons on Windows 10 show their icons again instead of empty
+  boxes.
+- On Windows, dragging the title bar, double-clicking it and the maximize button work every time
+  again, including in the fullscreen player.
+- Removing several playlists from your library at once no longer stops after the first one.
+- Sonora now tells you when your settings could not be saved, or when downloading, installing
+  or removing Widevine fails. Both used to fail without a word.
+- Show on Discord works with Discord Canary on Linux, including the Flatpak and running it next
+  to regular Discord.
+- On Linux, Sonora no longer closes on its own after playing for a while.
+- The Nix flake can build Sonora from source again, as `packages.<system>.sonora-src`.
+  The default package is still the release binary.
+- On Windows, Open log in Settings opens the log in Notepad while Sonora runs, and no
+  console window flashes. Open theme folder no longer flashes one either.
+- Ctrl+F (Cmd+F on macOS) opens the page's filter again after you close it with Escape or the
+  close button, and the other shortcuts keep working.
+- Pressing play and pause quickly several times in a row no longer leaves the music playing
+  while Sonora shows it paused.
+- Apple Music songs that Apple has re-released under a new id play again instead of showing as
+  unavailable in your library and playlists.
+- On Windows, maximizing Sonora on a monitor bigger than your main one fills the whole screen
+  instead of stopping at the main monitor's size.
+- Songs on YouTube Music and Apple Music no longer sometimes play with left and right swapped
+  after you seek or pick up partway through.
+- The fullscreen visualizer no longer mixes up the left and right channels after a mono track.
+- On Linux, middle-clicking a text field such as the search box pastes the text you last
+  selected in any app, and text you select in Sonora's fields can be middle-click pasted
+  elsewhere. On GNOME it follows the middle-click paste switch in Tweaks.
 
 ## [0.43.0] - 2026-10-13
 
@@ -45,6 +288,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Autoplay of similar tracks is now on for new installs, so playback carries on with similar songs when a queue ends. You can still turn it off in the queue.
 - Fullscreen lyrics grow with a large window, up to twice their size, so they no longer look
   small on a big screen. Small windows keep the size they had.
 - On Windows, the minimize, maximize, restore and close buttons now use Windows' own icons, so
@@ -2084,7 +2328,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Initial release: a native Spotify client with playback, an interactive queue, the saved library,
 search, album, playlist, artist and song pages, context menus and adaptive theming.
 
-[unreleased]: https://github.com/sonorahq/sonora/compare/v0.43.0...HEAD
+[unreleased]: https://github.com/sonorahq/sonora/compare/v0.44.1...HEAD
+[0.44.1]: https://github.com/sonorahq/sonora/compare/v0.44.0...v0.44.1
+[0.44.0]: https://github.com/sonorahq/sonora/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/sonorahq/sonora/compare/v0.42.2...v0.43.0
 [0.42.2]: https://github.com/sonorahq/sonora/compare/v0.42.1...v0.42.2
 [0.42.1]: https://github.com/sonorahq/sonora/compare/v0.42.0...v0.42.1

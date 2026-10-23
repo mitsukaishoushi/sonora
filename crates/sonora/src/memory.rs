@@ -1,20 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gpui::App;
 use state::Sonora;
 
-/// How often a due shed is tried and, under debug logging, the footprint is logged. The first
-/// tick comes after half of it, while startup is still settling.
+/// How often the footprint is logged under debug logging.
 const INTERVAL: Duration = Duration::from_secs(10);
-/// When clean file pages are shed after launch: once the renderer and drivers are up, again once
-/// the first screen has loaded, and once more after the first minute.
-const FIRST_SHEDS: [Duration; 3] = [
-    Duration::from_secs(5),
-    Duration::from_secs(15),
-    Duration::from_secs(60),
-];
-/// How often clean file pages are shed after the first time.
-const SHED_EVERY: Duration = Duration::from_secs(600);
 
 /// Keeps glibc to one malloc arena and sends every block of 256 KiB or more straight to mmap.
 /// Every arena holds on to the holes its own threads leave, so one shared arena reuses them where
@@ -31,35 +21,20 @@ pub fn tune() {
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
 pub fn tune() {}
 
-/// Gives clean file pages back to the kernel on the `FIRST_SHEDS` schedule and every `SHED_EVERY`
-/// after, but only while nobody is watching the window. Every page shed faults back in on its next
-/// access, so a shed under an animating window drops frames, and one that falls due while the
-/// window is watched waits for the next quiet tick.
+/// Logs the memory footprint every `INTERVAL` while debug logging is on, and does nothing
+/// otherwise.
 pub fn watch(cx: &mut App) {
+    if !log::log_enabled!(log::Level::Debug) {
+        return;
+    }
     cx.spawn(async move |cx| {
-        let started = Instant::now();
-        let mut sheds = FIRST_SHEDS.into_iter();
-        let mut shed_at = sheds.next().unwrap_or(SHED_EVERY);
-        let mut wait = INTERVAL / 2;
         loop {
-            cx.background_executor().timer(wait).await;
-            wait = INTERVAL;
-            if log::log_enabled!(log::Level::Debug) {
-                let probed = cx
-                    .background_executor()
-                    .spawn(async { (footprint().unwrap_or_default(), resident()) })
-                    .await;
-                cx.update(|cx| report(probed, cx));
-            }
-            if started.elapsed() < shed_at
-                || cx.update(|cx| Sonora::global(cx).wake.read(cx).watched())
-            {
-                continue;
-            }
-            shed_at = sheds
-                .next()
-                .unwrap_or_else(|| started.elapsed() + SHED_EVERY);
-            cx.background_executor().spawn(async { shed() }).detach();
+            cx.background_executor().timer(INTERVAL).await;
+            let probed = cx
+                .background_executor()
+                .spawn(async { (footprint().unwrap_or_default(), resident()) })
+                .await;
+            cx.update(|cx| report(probed, cx));
         }
     })
     .detach();
@@ -206,112 +181,6 @@ Rss:                 128 kB
 fn mib(bytes: usize) -> String {
     format!("{:.1} MiB", bytes as f64 / (1024. * 1024.))
 }
-
-/// Drops the clean pages of every read-only file mapping from the resident set: code and data of
-/// the executable and its libraries that startup touched once. Whatever is still in use faults
-/// back in on its next access. A mapping holding any copied-on-write page is skipped.
-///
-/// The executable and the GPU drivers lose their page table entries outright, which leaves the
-/// pages in the page cache even when another process maps them too. A driver is held open while
-/// that happens, so it cannot be unloaded and its range handed to memory the call would wipe.
-/// Every other library is only paged out, which never discards anything.
-#[cfg(target_os = "linux")]
-fn shed() {
-    let Ok(smaps) = std::fs::read_to_string("/proc/self/smaps") else {
-        return;
-    };
-    let executable = std::env::current_exe().ok();
-    let mut current: Option<(usize, usize, &str)> = None;
-    for line in smaps.lines() {
-        if let Some(path) = mapping(line) {
-            current = None;
-            let mut fields = line.split_whitespace();
-            let (Some(range), Some(perms)) = (fields.next(), fields.next()) else {
-                continue;
-            };
-            if !path.starts_with('/') || path.starts_with("/dev/") || perms.contains('w') {
-                continue;
-            }
-            current = range.split_once('-').and_then(|(start, end)| {
-                Some((
-                    usize::from_str_radix(start, 16).ok()?,
-                    usize::from_str_radix(end, 16).ok()?,
-                    path,
-                ))
-            });
-            continue;
-        }
-        let Some(rest) = line.strip_prefix("Anonymous:") else {
-            continue;
-        };
-        let Some((start, end, path)) = current.take() else {
-            continue;
-        };
-        if rest.split_whitespace().next() != Some("0") {
-            continue;
-        }
-        let (address, length) = (start as *mut libc::c_void, end - start);
-        let own = executable
-            .as_deref()
-            .is_some_and(|executable| executable == std::path::Path::new(path));
-        if own {
-            unsafe { libc::madvise(address, length, libc::MADV_DONTNEED) };
-            continue;
-        }
-        if driver(path)
-            && let Some(_held) = Held::open(path, start)
-        {
-            unsafe { libc::madvise(address, length, libc::MADV_DONTNEED) };
-            continue;
-        }
-        unsafe { libc::madvise(address, length, libc::MADV_PAGEOUT) };
-    }
-}
-
-/// A shared library held open with `dlopen`, so it stays mapped until this is dropped.
-#[cfg(target_os = "linux")]
-struct Held(*mut libc::c_void);
-
-#[cfg(target_os = "linux")]
-impl Held {
-    /// Holds the library at `path` open if it is still loaded and still mapped at `address`.
-    fn open(path: &str, address: usize) -> Option<Self> {
-        let name = std::ffi::CString::new(path).ok()?;
-        let handle = unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_NOLOAD | libc::RTLD_LAZY) };
-        if handle.is_null() {
-            return None;
-        }
-        let held = Self(handle);
-        let mut info: libc::Dl_info = unsafe { std::mem::zeroed() };
-        let found = unsafe { libc::dladdr(address as *const libc::c_void, &mut info) };
-        if found == 0 || info.dli_fname.is_null() {
-            return None;
-        }
-        let loaded = unsafe { std::ffi::CStr::from_ptr(info.dli_fname) };
-        let loaded = std::fs::canonicalize(loaded.to_str().ok()?).ok()?;
-        (loaded == std::path::Path::new(path)).then_some(held)
-    }
-}
-
-#[cfg(target_os = "linux")]
-impl Drop for Held {
-    fn drop(&mut self) {
-        unsafe { libc::dlclose(self.0) };
-    }
-}
-
-/// Whether a library is one of the GPU drivers the renderer opened at startup, or the LLVM they
-/// link, most of which a Vulkan renderer never calls.
-#[cfg(target_os = "linux")]
-fn driver(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    ["libLLVM", "libvulkan_", "libgallium"]
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn shed() {}
 
 #[cfg(target_os = "linux")]
 fn resident() -> Option<usize> {

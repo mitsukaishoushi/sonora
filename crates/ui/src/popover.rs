@@ -3,10 +3,15 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui::prelude::*;
-use gpui::{App, Div, StyleRefinement, Window, div};
+use gpui::{AnyElement, App, ClickEvent, Div, MouseButton, StyleRefinement, Window, div};
 
 use crate::button::Button;
 use crate::menu::{Menu, Trigger};
+
+/// Runs when a click on the trigger opens the popover.
+pub(crate) type Open = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+/// Opens or closes the popover from a click on its trigger, shared by either kind of trigger.
+type Toggle = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 #[derive(Clone, Default)]
 pub struct Popovers {
@@ -19,8 +24,19 @@ impl Popovers {
         self.open.set(None);
     }
 
+    /// Whether any popover of the group is open.
+    pub fn any(&self) -> bool {
+        self.open.get().is_some()
+    }
+
     pub fn shows(&self, key: &'static str) -> bool {
         self.open.get() == Some(key)
+    }
+
+    /// Opens the popover `key` names and closes any other of the group, for a trigger drawn
+    /// apart from the popover itself.
+    pub fn open(&self, key: &'static str) {
+        self.open.set(Some(key));
     }
 
     fn toggle(&self, key: &'static str) {
@@ -42,9 +58,12 @@ pub struct Popover {
     key: &'static str,
     group: Popovers,
     button: Option<Button>,
+    /// A trigger the caller draws instead of a button, which the popover makes clickable.
+    face: Option<AnyElement>,
     menu: Option<Menu>,
     selected: bool,
     commands: bool,
+    on_open: Option<Open>,
 }
 
 impl Popover {
@@ -54,14 +73,23 @@ impl Popover {
             key,
             group,
             button: None,
+            face: None,
             menu: None,
             selected: false,
             commands: false,
+            on_open: None,
         }
     }
 
     pub fn button(mut self, button: Button) -> Self {
         self.button = Some(button);
+        self
+    }
+
+    /// Opens the popover from `face`, drawn as given, rather than from a button. A click on it
+    /// toggles the popover and goes no further.
+    pub fn face(mut self, face: impl IntoElement) -> Self {
+        self.face = Some(face.into_any_element());
         self
     }
 
@@ -79,6 +107,16 @@ impl Popover {
         self.commands = true;
         self
     }
+
+    /// Runs `handler` when a click on the trigger opens the popover, not when it closes it, as
+    /// for reading afresh what the menu lists.
+    pub fn on_open(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_open = Some(Box::new(handler));
+        self
+    }
 }
 
 impl Styled for Popover {
@@ -94,23 +132,47 @@ impl RenderOnce for Popover {
             key,
             group,
             button,
+            face,
             menu,
             selected,
             commands,
+            on_open,
         } = self;
         let overrides = std::mem::take(base.style());
 
         let open = group.shows(key);
         let trigger = group.trigger(key);
-        let head = button.map(|button| {
+        let toggle: Toggle = {
             let group = group.clone();
-            let observed = trigger.clone();
-
-            head(observed).child(button.selected(selected || open).on_click(move |_, _, cx| {
+            Rc::new(move |event, window, cx| {
                 group.toggle(key);
+                if let Some(on_open) = on_open.as_ref().filter(|_| group.shows(key)) {
+                    on_open(event, window, cx);
+                }
                 cx.refresh_windows();
-            }))
-        });
+            })
+        };
+        let head = match (face, button) {
+            (Some(face), _) => Some(
+                head(trigger.clone()).max_w_full().child(
+                    div()
+                        .id(key)
+                        .max_w_full()
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(move |event, window, cx| toggle(event, window, cx))
+                        .child(face),
+                ),
+            ),
+            (None, Some(button)) => Some(
+                head(trigger.clone()).child(
+                    button
+                        .selected(selected || open)
+                        .on_click(move |event, window, cx| toggle(event, window, cx)),
+                ),
+            ),
+            (None, None) => None,
+        };
         let body = menu.filter(|_| open).map(|menu| {
             let outside = group.clone();
             let chosen = group.clone();

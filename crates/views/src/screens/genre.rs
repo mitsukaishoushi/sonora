@@ -12,7 +12,8 @@ use crate::shared::cells;
 use crate::shared::shelves::Shelves;
 use crate::shared::trouble;
 
-const TILE: Pixels = px(220.);
+/// How wide the title skeleton reaches while the genre name is on its way.
+const TITLE_SKELETON: Pixels = px(240.);
 const STEADY: Pixels = px(0.5);
 const SECTION: &str = "genre";
 
@@ -107,6 +108,7 @@ impl GenreView {
                     let id = id.clone();
                     detail.update(cx, |detail, cx| detail.open(&id, cx));
                 },
+                cx,
             )
             .size_full()
             .into_any_element(),
@@ -129,30 +131,44 @@ impl Render for GenreView {
 
         let detail = self.detail.read(cx);
         let loading = detail.is_loading();
-        let title = detail.name().unwrap_or_default().to_owned();
+        let title = detail.name().map(str::to_owned);
         let sections = detail.sections();
         let empty = !loading && sections.is_empty();
         let (mode, width) = (self.mode, self.width);
-        let shelves = self.shelves.update(cx, |shelves, cx| {
-            shelves.render(sections, mode, width, window, cx)
-        });
+        let shelves = self
+            .shelves
+            .update(cx, |shelves, cx| match loading && sections.is_empty() {
+                true => shelves.pending(width, cx),
+                false => vec![shelves.render(sections, mode, width, window, cx)],
+            });
 
         div().flex().flex_col().size_full().child(
-            Scroller::new("genre", &self.scrollbar).p(pad).child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_8()
-                    .child(
-                        div()
-                            .text_size(theme.text(Text::Display))
-                            .font_weight(FontWeight::BOLD)
-                            .child(SharedString::from(title)),
-                    )
-                    .when(loading, |this| this.child(Skeleton::new().w_full().h(TILE)))
-                    .when(empty, |this| this.child(vacant(t!("genre-empty"), cx)))
-                    .child(shelves),
-            ),
+            Scroller::new("genre", &self.scrollbar)
+                .bottom_inset(crate::chrome::Chrome::bottom(cx))
+                .p(pad)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_8()
+                        .when(title.is_none() && loading, |this| {
+                            this.child(
+                                Skeleton::new()
+                                    .w(TITLE_SKELETON)
+                                    .h(theme.text(Text::Display)),
+                            )
+                        })
+                        .when_some(title, |this, title| {
+                            this.child(
+                                div()
+                                    .text_size(theme.text(Text::Display))
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(SharedString::from(title)),
+                            )
+                        })
+                        .when(empty, |this| this.child(vacant(t!("genre-empty"), cx)))
+                        .children(shelves),
+                ),
         )
     }
 }

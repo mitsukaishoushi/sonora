@@ -1,11 +1,13 @@
-use std::collections::{HashSet, VecDeque};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::{Rc, Weak};
 use std::time::Duration;
 
-use gpui::{Context, Entity};
+use gpui::{App, Context, Entity};
 use music::{ArtistRef, Track};
 use serde::{Deserialize, Serialize};
 
-use crate::{AppSettings, Origin, Session, SessionEvent};
+use crate::{AppSettings, Origin, Outcome, Session, SessionEvent, Toast, Toasts};
 
 const PAST_LIMIT: usize = 500;
 const KEPT_PAST: usize = 20;
@@ -77,6 +79,57 @@ impl Entry {
     fn id(&self) -> Option<&str> {
         self.track.id.as_deref()
     }
+}
+
+/// What an Undo on a queue toast puts back. The toast's handler holds the only strong
+/// reference, so the tracks are let go once the toast is, and taking them empties it.
+type Snapshot<T> = Rc<RefCell<Option<T>>>;
+
+/// A toast the queue posted with an Undo, and a weak handle on what that Undo puts back.
+struct Reported<T> {
+    toast: usize,
+    undo: Weak<RefCell<Option<T>>>,
+}
+
+impl<T> Reported<T> {
+    /// What the toast's Undo puts back, while the toast is still up and its Undo unused, so a
+    /// change made meanwhile can join it.
+    fn live(&self, cx: &mut App) -> Option<Snapshot<T>> {
+        let shown = Toasts::entity(cx)
+            .read(cx)
+            .shown()
+            .iter()
+            .any(|toast| toast.id == self.toast);
+        let snapshot = self.undo.upgrade().filter(|_| shown)?;
+        let unused = snapshot.borrow().is_some();
+        unused.then_some(snapshot)
+    }
+}
+
+/// The upcoming tracks Clear took, each run kept apart so Undo can put it back in its own.
+struct Cleared {
+    manual: Vec<Entry>,
+    rest: Vec<Entry>,
+    /// `Queue::rebuilt` when the tracks were taken.
+    rebuilt: u64,
+}
+
+/// A track removed from the queue on its own, and where it sat.
+struct Taken {
+    entry: Entry,
+    spot: Spot,
+}
+
+/// Where a removed track sat, counted from the start of its run.
+#[derive(Clone, Copy)]
+enum Spot {
+    Manual(usize),
+    /// A track of the source, with `Queue::rebuilt` at the time, since a rebuild since may have
+    /// brought it back already.
+    Source(usize, u64),
+    /// A suggestion, with `Queue::suggested` at the time, since one from a batch replaced since
+    /// is not put back.
+    Similar(usize, u64),
 }
 
 fn stub(track: &Track) -> Option<Stub> {
@@ -338,6 +391,13 @@ pub struct Queue {
     similar: usize,
     shuffle: bool,
     revision: u64,
+    /// The toast counting tracks removed one by one while it may still be up.
+    removed: Option<Reported<Vec<Taken>>>,
+    /// Counts the times `upcoming` was rebuilt from the source, which can bring back tracks an
+    /// Undo is holding.
+    rebuilt: u64,
+    /// Counts the times the suggestions were replaced or dropped.
+    suggested: u64,
     session: Entity<Session>,
     settings: Entity<AppSettings>,
 }
@@ -350,7 +410,10 @@ impl Queue {
     ) -> Self {
         cx.subscribe(&session, |this, _, event, cx| match event {
             SessionEvent::SignedOut => this.purge(cx),
-            SessionEvent::SignedIn | SessionEvent::Reconnected | SessionEvent::LocalChanged => {}
+            SessionEvent::SignedIn
+            | SessionEvent::Reconnected
+            | SessionEvent::WentOffline
+            | SessionEvent::LocalChanged => {}
         })
         .detach();
 
@@ -365,6 +428,9 @@ impl Queue {
             similar: 0,
             shuffle,
             revision: 0,
+            removed: None,
+            rebuilt: 0,
+            suggested: 0,
             session,
             settings,
         }
@@ -379,6 +445,7 @@ impl Queue {
             return;
         }
         self.shuffle = on;
+        self.rebuilt += 1;
         self.settings
             .update(cx, |settings, cx| settings.set_shuffle(on, cx));
         let mut suggested = self.upcoming.split_off(self.queued());
@@ -440,6 +507,7 @@ impl Queue {
         self.upcoming = resume.upcoming.into_iter().map(&entry).collect();
         self.manual = resume.manual.min(self.upcoming.len());
         self.similar = 0;
+        self.suggested += 1;
         if let Some(origin) = resume.origin {
             self.past
                 .iter_mut()
@@ -462,6 +530,7 @@ impl Queue {
         let suggested = self.similar > 0;
         self.upcoming.truncate(self.queued());
         self.similar = 0;
+        self.suggested += 1;
         self.manual = self
             .upcoming
             .range(..self.manual)
@@ -497,6 +566,13 @@ impl Queue {
         self.current.as_ref()?.origin.as_ref()
     }
 
+    /// Where the current track sits in the collection the queue was started from. `None` when it
+    /// is not in that collection, as for a track queued by hand.
+    pub fn place(&self) -> Option<usize> {
+        let current = self.current.as_ref()?;
+        self.source.iter().position(|entry| entry == current)
+    }
+
     fn queued(&self) -> usize {
         self.upcoming.len() - self.similar
     }
@@ -523,6 +599,7 @@ impl Queue {
     pub fn suggest(&mut self, tracks: Vec<Track>, origin: Origin, cx: &mut Context<Self>) {
         self.upcoming.truncate(self.queued());
         self.similar = tracks.len();
+        self.suggested += 1;
         self.upcoming.extend(tagged(tracks, Some(origin)));
         self.changed(cx);
     }
@@ -544,6 +621,7 @@ impl Queue {
         }
         self.upcoming.truncate(self.queued());
         self.similar = 0;
+        self.suggested += 1;
         self.changed(cx);
     }
 
@@ -603,12 +681,58 @@ impl Queue {
         !self.past.is_empty()
     }
 
+    /// Drops everything queued, keeping the suggestions, and posts a toast whose Undo puts it
+    /// back. Every clear gets a toast and an Undo of its own.
     pub fn clear_upcoming(&mut self, cx: &mut Context<Self>) {
         if self.queued() == 0 {
             return;
         }
-        self.upcoming.drain(..self.queued());
+        let mut rest: Vec<Entry> = self.upcoming.drain(..self.queued()).collect();
+        let manual: Vec<Entry> = rest.drain(..self.manual).collect();
         self.manual = 0;
+        self.changed(cx);
+
+        let snapshot = Rc::new(RefCell::new(Some(Cleared {
+            manual,
+            rest,
+            rebuilt: self.rebuilt,
+        })));
+        let toast = Self::cleared_toast(snapshot, cx);
+        Toasts::post(toast, cx);
+    }
+
+    /// The Queue cleared toast, whose Undo hands `snapshot` back to the queue once.
+    fn cleared_toast(snapshot: Snapshot<Cleared>, cx: &mut Context<Self>) -> Toast {
+        let queue = cx.entity().downgrade();
+        Toast::new(Outcome::Plain, "toast-queue-cleared").undo(move |cx| {
+            let Some(cleared) = snapshot.borrow_mut().take() else {
+                return;
+            };
+            queue
+                .update(cx, |queue, cx| queue.unclear(cleared, cx))
+                .ok();
+        })
+    }
+
+    /// Puts back what Clear took, each run ahead of what was queued into it since, in the order
+    /// it had. A rebuild from the source since may have brought some of those tracks back
+    /// already, and those copies are dropped so nothing plays twice.
+    fn unclear(&mut self, cleared: Cleared, cx: &mut Context<Self>) {
+        let suggested = self.upcoming.split_off(self.queued());
+        let mut since_rest: Vec<Entry> = self.upcoming.drain(..).collect();
+        let since_manual: Vec<Entry> = since_rest.drain(..self.manual).collect();
+        if cleared.rebuilt != self.rebuilt {
+            drop_copies(&mut since_rest, &cleared.rest);
+        }
+        self.manual = cleared.manual.len() + since_manual.len();
+        self.upcoming = cleared
+            .manual
+            .into_iter()
+            .chain(since_manual)
+            .chain(cleared.rest)
+            .chain(since_rest)
+            .chain(suggested)
+            .collect();
         self.changed(cx);
     }
 
@@ -672,6 +796,8 @@ impl Queue {
         self.upcoming = past.split_off(index + 1).into();
         self.manual = 0;
         self.similar = 0;
+        self.rebuilt += 1;
+        self.suggested += 1;
         self.current = past.pop();
         if self.shuffle {
             scramble(&mut self.upcoming, &self.source, self.current.as_ref());
@@ -682,11 +808,7 @@ impl Queue {
         self.current().cloned()
     }
 
-    /// Queues a track after the ones already queued by hand, ahead of the rest of the source.
-    pub fn append(&mut self, track: Track, cx: &mut Context<Self>) {
-        self.append_all([track], None, cx);
-    }
-
+    /// Queues tracks after the ones already queued by hand, ahead of the rest of the source.
     pub fn append_all(
         &mut self,
         tracks: impl IntoIterator<Item = Track>,
@@ -697,10 +819,6 @@ impl Queue {
     }
 
     /// Queues tracks after everything else, so they play once the source has run out.
-    pub fn append_last(&mut self, track: Track, cx: &mut Context<Self>) {
-        self.append_last_all([track], None, cx);
-    }
-
     pub fn append_last_all(
         &mut self,
         tracks: impl IntoIterator<Item = Track>,
@@ -752,10 +870,6 @@ impl Queue {
         self.changed(cx);
     }
 
-    pub fn prepend(&mut self, track: Track, cx: &mut Context<Self>) {
-        self.prepend_all([track], None, cx);
-    }
-
     /// Queues tracks to play right after the current one, ahead of anything queued before.
     pub fn prepend_all(
         &mut self,
@@ -787,20 +901,120 @@ impl Queue {
         self.move_upcoming(from, to, cx);
     }
 
+    /// Removes one queued track and reports it on the toast that counts removals, whose Undo
+    /// puts it back.
     pub fn remove_upcoming(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index < self.queued() && self.upcoming.remove(index).is_some() {
-            self.manual -= usize::from(index < self.manual);
-            self.changed(cx);
+        if index >= self.queued() {
+            return;
         }
+        let Some(entry) = self.upcoming.remove(index) else {
+            return;
+        };
+        let spot = match index < self.manual {
+            true => Spot::Manual(index),
+            false => Spot::Source(index - self.manual, self.rebuilt),
+        };
+        self.manual -= usize::from(index < self.manual);
+        self.changed(cx);
+        self.report_removal(Taken { entry, spot }, cx);
     }
 
+    /// Removes one suggestion and reports it the way `remove_upcoming` does.
     pub fn remove_similar(&mut self, index: usize, cx: &mut Context<Self>) {
         if index >= self.similar {
             return;
         }
-        if self.upcoming.remove(self.queued() + index).is_some() {
-            self.similar -= 1;
-            self.changed(cx);
+        let Some(entry) = self.upcoming.remove(self.queued() + index) else {
+            return;
+        };
+        self.similar -= 1;
+        self.changed(cx);
+        let spot = Spot::Similar(index, self.suggested);
+        self.report_removal(Taken { entry, spot }, cx);
+    }
+
+    /// Adds a removed track to the toast that reports removals, or posts a new one once the
+    /// last has gone. Every removal restarts its clock.
+    fn report_removal(&mut self, taken: Taken, cx: &mut Context<Self>) {
+        let live = self
+            .removed
+            .as_ref()
+            .and_then(|reported| Some((reported.toast, reported.live(cx)?)));
+        match live {
+            Some((id, snapshot)) => {
+                if let Some(removed) = snapshot.borrow_mut().as_mut() {
+                    removed.push(taken);
+                }
+                let toast = Self::removal_toast(snapshot, cx);
+                Toasts::settle(id, toast, cx);
+            }
+            None => {
+                let snapshot = Rc::new(RefCell::new(Some(vec![taken])));
+                let undo = Rc::downgrade(&snapshot);
+                let toast = Self::removal_toast(snapshot, cx);
+                let toast = Toasts::post(toast, cx);
+                self.removed = Some(Reported { toast, undo });
+            }
+        }
+    }
+
+    /// The toast for tracks removed one by one, naming one and counting several. Its Undo hands
+    /// `snapshot` back to the queue once.
+    fn removal_toast(snapshot: Snapshot<Vec<Taken>>, cx: &mut Context<Self>) -> Toast {
+        let toast = match snapshot.borrow().as_deref() {
+            Some([only]) => Toast::new(Outcome::Plain, "toast-queue-removed-track")
+                .name(only.entry.track.name.clone()),
+            removed => Toast::new(Outcome::Plain, "toast-queue-removed-tracks")
+                .count(removed.map_or(0, <[Taken]>::len)),
+        };
+        let queue = cx.entity().downgrade();
+        toast.undo(move |cx| {
+            let Some(removed) = snapshot.borrow_mut().take() else {
+                return;
+            };
+            queue
+                .update(cx, |queue, cx| queue.put_back(removed, cx))
+                .ok();
+        })
+    }
+
+    /// Puts removed tracks back where they sat, newest first, so each lands where it was before
+    /// the ones after it were taken. Spots are clamped to what each run holds now, a copy a
+    /// rebuild brought back is dropped so nothing plays twice, and suggestions from a batch
+    /// replaced since are left out.
+    fn put_back(&mut self, removed: Vec<Taken>, cx: &mut Context<Self>) {
+        for Taken { entry, spot } in removed.into_iter().rev() {
+            match spot {
+                Spot::Manual(index) => {
+                    self.upcoming.insert(index.min(self.manual), entry);
+                    self.manual += 1;
+                }
+                Spot::Source(index, rebuilt) => {
+                    if rebuilt != self.rebuilt {
+                        self.drop_copy(&entry);
+                    }
+                    let at = (self.manual + index).min(self.queued());
+                    self.upcoming.insert(at, entry);
+                }
+                Spot::Similar(index, batch) if batch == self.suggested => {
+                    let at = self.queued() + index.min(self.similar);
+                    self.upcoming.insert(at, entry);
+                    self.similar += 1;
+                }
+                Spot::Similar(..) => {}
+            }
+        }
+        self.changed(cx);
+    }
+
+    /// Takes the first copy of `entry`'s track out of the source's run, matched by id.
+    fn drop_copy(&mut self, entry: &Entry) {
+        let Some(id) = entry.id() else {
+            return;
+        };
+        let copy = (self.manual..self.queued()).find(|&at| self.upcoming[at].id() == Some(id));
+        if let Some(copy) = copy {
+            self.upcoming.remove(copy);
         }
     }
 
@@ -880,6 +1094,23 @@ impl Queue {
         self.changed(cx);
         self.current().cloned()
     }
+}
+
+/// Drops from `entries` one copy of each track in `restored`, matched by id, for when the
+/// queue brought back on its own some of what an Undo is about to restore.
+fn drop_copies(entries: &mut Vec<Entry>, restored: &[Entry]) {
+    let mut owed: HashMap<&str, usize> = HashMap::new();
+    for id in restored.iter().filter_map(Entry::id) {
+        *owed.entry(id).or_default() += 1;
+    }
+    entries.retain(|entry| {
+        let Some(owed) = entry.id().and_then(|id| owed.get_mut(id)) else {
+            return true;
+        };
+        let keep = *owed == 0;
+        *owed = owed.saturating_sub(1);
+        keep
+    });
 }
 
 #[cfg(test)]

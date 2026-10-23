@@ -2,11 +2,11 @@ use gpui::{App, Context, Menu, MenuItem, OsAction};
 use i18n::t;
 use input::{
     CloseWindow, DecreaseFontSize, Hide, HideOthers, IncreaseFontSize, MinimizeWindow,
-    OpenSettings, Quit, RefreshLibrary, ResetFontSize, ShowAll, SignOut, SongNext, SongPrevious,
-    TogglePlayback, ToggleRepeat, ToggleShuffle, ZoomWindow,
+    OpenSettings, Quit, Redo, Refresh, ResetFontSize, ShowAll, SignOut, SongNext, SongPrevious,
+    TogglePlayback, ToggleRepeat, ToggleShuffle, Undo, ZoomWindow,
 };
 use router::Destination;
-use state::{AppSettings, Shelf, Sonora};
+use state::{AppSettings, Equalizer, Shelf, Sonora};
 use ui::{ActiveTheme as _, Copy, Cut, Look, Paste, SelectAll, Theme};
 
 /// How far one font size shortcut moves the size, the same step as the buttons in Settings.
@@ -37,15 +37,18 @@ pub fn register(lingers: bool, cx: &mut App) {
         session.update(cx, |session, cx| session.sign_out(cx));
     });
 
+    // Root handles Refresh whenever a window is open; this runs only without one (the macOS menu).
     cx.on_action(
-        |_: &RefreshLibrary, cx: &mut App| match router::trail(cx).read(cx).current() {
+        |_: &Refresh, cx: &mut App| match router::trail(cx).read(cx).current() {
             Destination::History => {
                 let history = Sonora::global(cx).history.clone();
                 history.update(cx, |history, cx| history.refresh(cx));
             }
+            at if !at.refreshes() => {}
             at => {
                 let shelf = match at {
                     Destination::Local(_) => Shelf::Local,
+                    Destination::Album(id) | Destination::Playlist(id) => Shelf::of(&id),
                     _ => Shelf::Streaming,
                 };
                 let library = Sonora::global(cx).library.clone();
@@ -70,14 +73,17 @@ pub fn register(lingers: bool, cx: &mut App) {
     });
 
     cx.on_action(|_: &ToggleShuffle, cx: &mut App| {
-        let queue = Sonora::global(cx).queue.clone();
-        queue.update(cx, |queue, cx| queue.toggle_shuffle(cx));
+        let playback = Sonora::global(cx).playback.clone();
+        playback.update(cx, |playback, cx| playback.toggle_shuffle(cx));
     });
 
     cx.on_action(|_: &ToggleRepeat, cx: &mut App| {
         let playback = Sonora::global(cx).playback.clone();
         playback.update(cx, |playback, cx| playback.toggle_repeat(cx));
     });
+
+    cx.on_action(|_: &Undo, cx: &mut App| edit_equalizer(cx, Equalizer::undo));
+    cx.on_action(|_: &Redo, cx: &mut App| edit_equalizer(cx, Equalizer::redo));
 
     cx.on_action(|_: &IncreaseFontSize, cx: &mut App| {
         change_font_size(cx, |settings, cx| {
@@ -105,7 +111,7 @@ fn menus() -> Vec<Menu> {
         true => vec![
             MenuItem::action(t!("app-settings"), OpenSettings),
             MenuItem::separator(),
-            MenuItem::action(t!("app-refresh-library"), RefreshLibrary),
+            MenuItem::action(t!("app-refresh"), Refresh),
             MenuItem::action(t!("app-sign-out"), SignOut),
             MenuItem::separator(),
             MenuItem::action(t!("app-hide"), Hide),
@@ -115,7 +121,7 @@ fn menus() -> Vec<Menu> {
             MenuItem::action(t!("app-quit"), Quit),
         ],
         false => vec![
-            MenuItem::action(t!("app-refresh-library"), RefreshLibrary),
+            MenuItem::action(t!("app-refresh"), Refresh),
             MenuItem::action(t!("app-sign-out"), SignOut),
             MenuItem::separator(),
             MenuItem::action(t!("app-quit"), Quit),
@@ -148,6 +154,14 @@ fn menus() -> Vec<Menu> {
         });
     }
     menus
+}
+
+/// Runs `edit` on the equalizer while its screen is the one shown, the only place undo applies.
+fn edit_equalizer(cx: &mut App, edit: fn(&mut Equalizer, &mut Context<Equalizer>)) {
+    if router::trail(cx).read(cx).current() == Destination::Equalizer {
+        let equalizer = Sonora::global(cx).equalizer.clone();
+        equalizer.update(cx, edit);
+    }
 }
 
 /// Applies `change` to the saved font size and redraws with it, keeping the cover tint the

@@ -5,6 +5,15 @@ use gpui::{App, AssetSource, SharedString};
 
 include!(concat!(env!("OUT_DIR"), "/fonts.rs"));
 
+/// Where About asks for the app icon, and the icon this platform shows for the app.
+const APP_ICON: &str = "brand/sonora.svg";
+#[cfg(target_os = "macos")]
+const APP_ICON_SVG: &[u8] = include_bytes!("../../../assets/macos/sonora.svg");
+#[cfg(target_os = "windows")]
+const APP_ICON_SVG: &[u8] = include_bytes!("../../../assets/windows/sonora.svg");
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const APP_ICON_SVG: &[u8] = include_bytes!("../../../assets/linux/sonora.svg");
+
 pub struct Assets;
 
 impl Assets {
@@ -20,6 +29,9 @@ impl Assets {
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if path == APP_ICON {
+            return Ok(Some(Cow::Borrowed(APP_ICON_SVG)));
+        }
         if let Some(bytes) = icons::asset(path) {
             return Ok(Some(Cow::Borrowed(bytes)));
         }

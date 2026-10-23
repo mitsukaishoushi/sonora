@@ -83,43 +83,23 @@ pub struct Look {
     pub tint_secondary: Option<Hsla>,
 }
 
+/// The built-in neutral palettes. Every other theme is a theme file laid over `Dark`, and the
+/// adaptive theme tints only these.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeKind {
     System,
     Dark,
     Light,
-    Midnight,
-    Forest,
-    Ocean,
-    Rose,
-    Lavender,
-    Amber,
 }
 
 impl ThemeKind {
-    pub const ALL: [Self; 9] = [
-        Self::System,
-        Self::Dark,
-        Self::Light,
-        Self::Midnight,
-        Self::Forest,
-        Self::Ocean,
-        Self::Rose,
-        Self::Lavender,
-        Self::Amber,
-    ];
+    pub const ALL: [Self; 3] = [Self::System, Self::Dark, Self::Light];
 
     pub fn id(self) -> &'static str {
         match self {
             Self::System => "system",
             Self::Dark => "dark",
             Self::Light => "light",
-            Self::Midnight => "midnight",
-            Self::Forest => "forest",
-            Self::Ocean => "ocean",
-            Self::Rose => "rose",
-            Self::Lavender => "lavender",
-            Self::Amber => "amber",
         }
     }
 
@@ -128,25 +108,15 @@ impl ThemeKind {
             Self::System => t!("theme-system"),
             Self::Dark => t!("theme-dark"),
             Self::Light => t!("theme-light"),
-            Self::Midnight => t!("theme-midnight"),
-            Self::Forest => t!("theme-forest"),
-            Self::Ocean => t!("theme-ocean"),
-            Self::Rose => t!("theme-rose"),
-            Self::Lavender => t!("theme-lavender"),
-            Self::Amber => t!("theme-amber"),
         }
     }
 
+    /// The kind an id names. Any other id, such as a theme file's, names `Dark`, the palette
+    /// a theme file is laid over.
     pub fn from_id(id: &str) -> Self {
         match id {
             "system" => Self::System,
             "light" => Self::Light,
-            "midnight" => Self::Midnight,
-            "forest" => Self::Forest,
-            "ocean" => Self::Ocean,
-            "rose" => Self::Rose,
-            "lavender" => Self::Lavender,
-            "amber" => Self::Amber,
             _ => Self::Dark,
         }
     }
@@ -523,214 +493,10 @@ impl Theme {
         }
     }
 
-    pub fn midnight() -> Self {
-        Self {
-            background: rgb(0x07111f).into(),
-            foreground: rgb(0xe6edf7).into(),
-            border: rgba(0x40689266).into(),
-            muted: rgb(0x15283d).into(),
-            overlay: rgba(0x0000008c).into(),
-            overlay_foreground: rgb(0xfafafa).into(),
-            muted_foreground: rgb(0x8296ad).into(),
-            secondary: rgb(0x102238).into(),
-            secondary_hover: rgba(0x23477066).into(),
-            secondary_active: rgba(0x2f5b8c66).into(),
-            primary: rgb(0x38bdf8).into(),
-            primary_foreground: rgb(0x07111f).into(),
-            primary_hover: rgba(0x7dd3fcb3).into(),
-            danger: rgb(0x991b1b).into(),
-            danger_foreground: rgb(0xfff1f2).into(),
-            danger_hover: rgba(0xb91c1cb3).into(),
-            popover: rgb(0x0b1a2c).into(),
-            popover_foreground: rgb(0xe6edf7).into(),
-            progress_bar: rgb(0x38bdf8).into(),
-            selection: rgb(0x0284c7).into(),
-            sidebar: rgb(0x091827).into(),
-            sidebar_accent: rgba(0x2c548666).into(),
-            sidebar_border: rgb(0x1e344d).into(),
-            title_bar_border: rgb(0x1e344d).into(),
-            table_head: rgba(0x102238e6).into(),
-            table_head_foreground: rgb(0x8296ad).into(),
-            table_row_border: rgba(0x1e344db3).into(),
-            table_hover: rgba(0x1c3f6266).into(),
-            table_active: rgba(0x0284c733).into(),
-            table_active_border: rgb(0x38bdf8).into(),
-            radius: px(6.),
-            font_size: px(14.),
-            metrics: Metrics::default(),
-            transparent: false,
-            blur: false,
-            blur_window: false,
-            tint: None,
-            tint_secondary: None,
-        }
-    }
-
-    pub fn forest() -> Self {
-        Self {
-            background: rgb(0x0b1410).into(),
-            foreground: rgb(0xecf7ef).into(),
-            border: rgba(0x4e7a6066).into(),
-            muted: rgb(0x203328).into(),
-            overlay: rgba(0x0000008c).into(),
-            overlay_foreground: rgb(0xfafafa).into(),
-            muted_foreground: rgb(0x86a58f).into(),
-            secondary: rgb(0x16261d).into(),
-            secondary_hover: rgba(0x304a3a66).into(),
-            secondary_active: rgba(0x41664f66).into(),
-            primary: rgb(0x86efac).into(),
-            primary_foreground: rgb(0x0b1410).into(),
-            primary_hover: rgba(0xbbf7d0b3).into(),
-            danger: rgb(0x991b1b).into(),
-            danger_foreground: rgb(0xfff1f2).into(),
-            danger_hover: rgba(0xb91c1cb3).into(),
-            popover: rgb(0x101d16).into(),
-            popover_foreground: rgb(0xecf7ef).into(),
-            progress_bar: rgb(0x4ade80).into(),
-            selection: rgb(0x16a34a).into(),
-            sidebar: rgb(0x0d1812).into(),
-            sidebar_accent: rgba(0x3c5c4966).into(),
-            sidebar_border: rgb(0x263d30).into(),
-            title_bar_border: rgb(0x263d30).into(),
-            table_head: rgba(0x16261de6).into(),
-            table_head_foreground: rgb(0x86a58f).into(),
-            table_row_border: rgba(0x263d30b3).into(),
-            table_hover: rgba(0x27423166).into(),
-            table_active: rgba(0x16a34a33).into(),
-            table_active_border: rgb(0x4ade80).into(),
-            radius: px(6.),
-            font_size: px(14.),
-            metrics: Metrics::default(),
-            transparent: false,
-            blur: false,
-            blur_window: false,
-            tint: None,
-            tint_secondary: None,
-        }
-    }
-
-    pub fn ocean() -> Self {
-        let mut theme = Self::midnight();
-        theme.background = rgb(0x06171a).into();
-        theme.border = rgba(0x3f808666).into();
-        theme.muted = rgb(0x17373b).into();
-        theme.muted_foreground = rgb(0x7fa9ad).into();
-        theme.secondary = rgb(0x0f292d).into();
-        theme.secondary_hover = rgba(0x244f5466).into();
-        theme.secondary_active = rgba(0x346b7266).into();
-        theme.primary = rgb(0x5eead4).into();
-        theme.primary_foreground = rgb(0x06171a).into();
-        theme.primary_hover = rgba(0x99f6e4b3).into();
-        theme.popover = rgb(0x0a2024).into();
-        theme.progress_bar = rgb(0x2dd4bf).into();
-        theme.selection = rgb(0x0d9488).into();
-        theme.sidebar = rgb(0x081c1f).into();
-        theme.sidebar_accent = rgba(0x2d606566).into();
-        theme.sidebar_border = rgb(0x1d4145).into();
-        theme.title_bar_border = rgb(0x1d4145).into();
-        theme.table_head = rgba(0x0f292de6).into();
-        theme.table_head_foreground = rgb(0x5a787b).into();
-        theme.table_row_border = rgba(0x1d4145b3).into();
-        theme.table_hover = rgba(0x1b454b66).into();
-        theme.table_active = rgba(0x0d948833).into();
-        theme.table_active_border = rgb(0x2dd4bf).into();
-        theme
-    }
-
-    pub fn rose() -> Self {
-        let mut theme = Self::dark();
-        theme.background = rgb(0x180b10).into();
-        theme.border = rgba(0x984e6766).into();
-        theme.muted = rgb(0x3b2029).into();
-        theme.muted_foreground = rgb(0xb58a98).into();
-        theme.secondary = rgb(0x2b161e).into();
-        theme.secondary_hover = rgba(0x55303c66).into();
-        theme.secondary_active = rgba(0x713a4d66).into();
-        theme.primary = rgb(0xfda4af).into();
-        theme.primary_foreground = rgb(0x180b10).into();
-        theme.primary_hover = rgba(0xfecdd3b3).into();
-        theme.popover = rgb(0x211018).into();
-        theme.progress_bar = rgb(0xfb7185).into();
-        theme.selection = rgb(0xe11d48).into();
-        theme.sidebar = rgb(0x1c0d13).into();
-        theme.sidebar_accent = rgba(0x6a3c4a66).into();
-        theme.sidebar_border = rgb(0x4b2633).into();
-        theme.title_bar_border = rgb(0x4b2633).into();
-        theme.table_head = rgba(0x2b161ee6).into();
-        theme.table_head_foreground = rgb(0x80626c).into();
-        theme.table_row_border = rgba(0x4b2633b3).into();
-        theme.table_hover = rgba(0x49273366).into();
-        theme.table_active = rgba(0xe11d4833).into();
-        theme.table_active_border = rgb(0xfb7185).into();
-        theme
-    }
-
-    pub fn lavender() -> Self {
-        let mut theme = Self::dark();
-        theme.background = rgb(0x120e1c).into();
-        theme.border = rgba(0x7e66b266).into();
-        theme.muted = rgb(0x302745).into();
-        theme.muted_foreground = rgb(0xa99bc2).into();
-        theme.secondary = rgb(0x241c35).into();
-        theme.secondary_hover = rgba(0x473a6466).into();
-        theme.secondary_active = rgba(0x5d4b8566).into();
-        theme.primary = rgb(0xc4b5fd).into();
-        theme.primary_foreground = rgb(0x120e1c).into();
-        theme.primary_hover = rgba(0xddd6feb3).into();
-        theme.popover = rgb(0x191326).into();
-        theme.progress_bar = rgb(0xa78bfa).into();
-        theme.selection = rgb(0x7c3aed).into();
-        theme.sidebar = rgb(0x161020).into();
-        theme.sidebar_accent = rgba(0x57497c66).into();
-        theme.sidebar_border = rgb(0x3d3158).into();
-        theme.title_bar_border = rgb(0x3d3158).into();
-        theme.table_head = rgba(0x241c35e6).into();
-        theme.table_head_foreground = rgb(0x786e8a).into();
-        theme.table_row_border = rgba(0x3d3158b3).into();
-        theme.table_hover = rgba(0x3c2f5666).into();
-        theme.table_active = rgba(0x7c3aed33).into();
-        theme.table_active_border = rgb(0xa78bfa).into();
-        theme
-    }
-
-    pub fn amber() -> Self {
-        let mut theme = Self::dark();
-        theme.background = rgb(0x171108).into();
-        theme.border = rgba(0x94703c66).into();
-        theme.muted = rgb(0x382b18).into();
-        theme.muted_foreground = rgb(0xad9878).into();
-        theme.secondary = rgb(0x291f11).into();
-        theme.secondary_hover = rgba(0x513f2466).into();
-        theme.secondary_active = rgba(0x6f542d66).into();
-        theme.primary = rgb(0xfcd34d).into();
-        theme.primary_foreground = rgb(0x171108).into();
-        theme.primary_hover = rgba(0xfde68ab3).into();
-        theme.popover = rgb(0x20170c).into();
-        theme.progress_bar = rgb(0xf59e0b).into();
-        theme.selection = rgb(0xd97706).into();
-        theme.sidebar = rgb(0x1b1409).into();
-        theme.sidebar_accent = rgba(0x634e2e66).into();
-        theme.sidebar_border = rgb(0x49371d).into();
-        theme.title_bar_border = rgb(0x49371d).into();
-        theme.table_head = rgba(0x291f11e6).into();
-        theme.table_head_foreground = rgb(0x7b6c55).into();
-        theme.table_row_border = rgba(0x49371db3).into();
-        theme.table_hover = rgba(0x45341d66).into();
-        theme.table_active = rgba(0xd9770633).into();
-        theme.table_active_border = rgb(0xf59e0b).into();
-        theme
-    }
-
     pub fn for_kind(kind: ThemeKind) -> Self {
         match kind {
             ThemeKind::System | ThemeKind::Dark => Self::dark(),
             ThemeKind::Light => Self::light(),
-            ThemeKind::Midnight => Self::midnight(),
-            ThemeKind::Forest => Self::forest(),
-            ThemeKind::Ocean => Self::ocean(),
-            ThemeKind::Rose => Self::rose(),
-            ThemeKind::Lavender => Self::lavender(),
-            ThemeKind::Amber => Self::amber(),
         }
     }
 

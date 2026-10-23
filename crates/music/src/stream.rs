@@ -35,8 +35,9 @@ pub const PREROLL: usize = 256 * 1024;
 /// output for the rest of the session.
 const PATIENCE: Duration = Duration::from_secs(20);
 
-/// The most one track may spool. A long album side is tens of megabytes, so this is only a
-/// ceiling on what a wrong `Content-Length` or an endless body can cost.
+/// The most one track may spool unless its body allows more. A long album side is tens of
+/// megabytes, so this is only a ceiling on what a wrong `Content-Length` or an endless body can
+/// cost. It also bounds the room a spool in memory reserves up front.
 const CEILING: usize = 256 * 1024 * 1024;
 
 /// What a provider does to the body of one track: as it arrives, and before it is served.
@@ -83,6 +84,12 @@ pub trait Body: Send + 'static {
     fn confidential(&self) -> bool {
         false
     }
+
+    /// The most this track may spool. A body whose tracks run longer than any ordinary file
+    /// answers more, and its track may then reach the heap at that size if the disk fails it.
+    fn ceiling(&self) -> usize {
+        CEILING
+    }
 }
 
 /// A body that is already what it should be.
@@ -97,9 +104,13 @@ pub trait Source: Send + 'static {
     fn chunk(&mut self) -> impl Future<Output = Result<Option<Bytes>>> + Send;
 }
 
+/// A failed read drops the url from its error, since a media url is often signed and the error
+/// ends up in the log.
 impl Source for reqwest::Response {
     async fn chunk(&mut self) -> Result<Option<Bytes>> {
-        Ok(reqwest::Response::chunk(self).await?)
+        Ok(reqwest::Response::chunk(self)
+            .await
+            .map_err(reqwest::Error::without_url)?)
     }
 }
 
@@ -119,29 +130,37 @@ enum Store {
 }
 
 impl Spool {
-    /// A spool on disk, or in memory sized for `total` when the disk will not have one.
-    fn new(total: Option<u64>) -> Self {
+    /// A spool on disk, or in memory sized for `total` when the disk will not have one. The
+    /// track may spool up to `ceiling` bytes.
+    fn new(total: Option<u64>, ceiling: usize) -> Self {
         match spool_file() {
             Ok(file) => Self {
                 len: 0,
-                announced: announced(total),
+                announced: announced(total, ceiling),
                 store: Store::File(file),
             },
             Err(error) => {
                 log::warn!("playback: cannot spool to disk, buffering in memory: {error}");
-                Self::in_memory(total)
+                Self::held(total, ceiling)
             }
         }
     }
 
+    /// A spool in memory for a track under the default ceiling, for a test to fill by hand.
+    #[cfg(test)]
+    pub(crate) fn in_memory(total: Option<u64>) -> Self {
+        Self::held(total, CEILING)
+    }
+
     /// A spool in memory, with room reserved for `total` bytes when that is known and for the
     /// preroll when it is not. A body of unknown length then starts out big enough to be mapped
-    /// on its own, rather than growing through a run of heap blocks that each leave a hole.
-    pub(crate) fn in_memory(total: Option<u64>) -> Self {
+    /// on its own, rather than growing through a run of heap blocks that each leave a hole. The
+    /// reservation never passes the default ceiling, whatever `ceiling` the track may grow to.
+    fn held(total: Option<u64>, ceiling: usize) -> Self {
         let room = total.map_or(PREROLL, |total| usize::try_from(total).unwrap_or(CEILING));
         Self {
             len: 0,
-            announced: announced(total),
+            announced: announced(total, ceiling),
             store: Store::Memory(Vec::with_capacity(room.min(CEILING))),
         }
     }
@@ -316,8 +335,8 @@ impl<B: Body> Stream<B> {
         let shared = Arc::new(Shared {
             state: Mutex::new(Buffered {
                 spool: match body.confidential() {
-                    true => Spool::in_memory(total),
-                    false => Spool::new(total),
+                    true => Spool::held(total, body.ceiling()),
+                    false => Spool::new(total, body.ceiling()),
                 },
                 total,
                 complete: false,
@@ -535,9 +554,15 @@ async fn pump<S: Source, B: Body>(
                 return;
             };
             let Buffered { spool, body, .. } = &mut *state;
-            if spool.len() + chunk.len() > CEILING {
+            let ceiling = body.ceiling();
+            if spool
+                .len()
+                .checked_add(chunk.len())
+                .is_none_or(|end| end > ceiling)
+            {
                 drop(state);
-                shared.finish(Some(format!("the track is longer than {CEILING} bytes")));
+                shared.finish(Some(format!("the track is longer than {ceiling} bytes")));
+                progress.send_modify(|_| {});
                 return;
             }
             staged.clear();
@@ -679,11 +704,11 @@ impl<B: Body> Seek for Reader<B> {
     }
 }
 
-/// An announced body length as a size, when it fits under the ceiling.
-fn announced(total: Option<u64>) -> Option<usize> {
+/// An announced body length as a size, when it fits under `ceiling`.
+fn announced(total: Option<u64>, ceiling: usize) -> Option<usize> {
     total
         .and_then(|total| usize::try_from(total).ok())
-        .filter(|total| *total <= CEILING)
+        .filter(|total| *total <= ceiling)
 }
 
 /// A file in Sonora's cache directory with no name, so nothing is left behind however the

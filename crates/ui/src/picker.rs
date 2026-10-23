@@ -1,9 +1,10 @@
 use gpui::prelude::*;
-use gpui::{App, Hsla, Pixels, SharedString, StyleRefinement, Window, px};
+use gpui::{AnyElement, App, ClickEvent, Hsla, Pixels, SharedString, StyleRefinement, Window, px};
 
 use crate::button::Button;
 use crate::menu::{Menu, MenuItem, TRIGGER_GAP};
-use crate::popover::{Popover, Popovers};
+use crate::popover::{Open, Popover, Popovers};
+use crate::scrollbar::Scrollbar;
 use crate::theme::ActiveTheme as _;
 
 enum Face {
@@ -18,6 +19,8 @@ pub struct Picker {
     key: &'static str,
     group: Popovers,
     face: Face,
+    /// A small element drawn before the current choice on the trigger.
+    leading: Option<AnyElement>,
     tooltip: Option<&'static str>,
     above: bool,
     tint: Option<Hsla>,
@@ -26,8 +29,12 @@ pub struct Picker {
     width: Pixels,
     left: bool,
     sticky: bool,
+    disabled: bool,
     items: Vec<MenuItem>,
     menu: Option<Menu>,
+    /// How tall the menu grows before it scrolls, unbounded when `None`.
+    scroll_after: Option<Pixels>,
+    on_open: Option<Open>,
 }
 
 impl Picker {
@@ -41,6 +48,7 @@ impl Picker {
             key,
             group: group.clone(),
             face: Face::Label(current.into()),
+            leading: None,
             tooltip: None,
             above: false,
             tint: None,
@@ -49,8 +57,11 @@ impl Picker {
             width: Self::REGULAR,
             left: false,
             sticky: false,
+            disabled: false,
             items: Vec::new(),
             menu: None,
+            scroll_after: None,
+            on_open: None,
         }
     }
 
@@ -68,6 +79,13 @@ impl Picker {
             face: Face::Plain(label.into()),
             ..Self::new(key, group, "")
         }
+    }
+
+    /// Draws `leading` before the current choice on the trigger, as the menu's items may draw
+    /// one before theirs.
+    pub fn leading(mut self, leading: impl IntoElement) -> Self {
+        self.leading = Some(leading.into_any_element());
+        self
     }
 
     pub fn tooltip(mut self, key: &'static str) -> Self {
@@ -111,6 +129,12 @@ impl Picker {
         self
     }
 
+    /// Holds the trigger still, so the menu cannot open, as while an earlier choice is applied.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
     pub fn item(mut self, item: MenuItem) -> Self {
         self.items.push(item);
         self
@@ -121,8 +145,24 @@ impl Picker {
         self
     }
 
+    /// Runs `handler` when a click opens the menu, as for reading afresh what it lists.
+    pub fn on_open(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_open = Some(Box::new(handler));
+        self
+    }
+
     pub fn menu(mut self, menu: Menu) -> Self {
         self.menu = Some(menu);
+        self
+    }
+
+    /// Caps the menu at `height` and scrolls what does not fit. Ignored when a whole `menu` is
+    /// given, which brings its own.
+    pub fn scroll_after(mut self, height: Pixels) -> Self {
+        self.scroll_after = Some(height);
         self
     }
 }
@@ -134,12 +174,13 @@ impl Styled for Picker {
 }
 
 impl RenderOnce for Picker {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let Self {
             style,
             key,
             group,
             face,
+            leading,
             tooltip,
             above,
             tint,
@@ -148,8 +189,11 @@ impl RenderOnce for Picker {
             width,
             left,
             sticky,
+            disabled,
             items,
             menu,
+            scroll_after,
+            on_open,
         } = self;
 
         let theme = *cx.theme();
@@ -172,23 +216,41 @@ impl RenderOnce for Picker {
         };
         let button = button
             .when(small, Button::small)
+            .when_some(leading, Button::leading)
             .when_some(tooltip, |button, key| match above {
                 true => button.tooltip_above(key),
                 false => button.tooltip(key),
             })
-            .when_some(tint, Button::tint);
+            .when_some(tint, Button::tint)
+            .disabled(disabled);
 
-        let menu = menu
-            .unwrap_or_else(|| Menu::new(SharedString::from(format!("{key}-menu"))).w(width))
-            .items(items)
-            .top(drop)
-            .when_else(left, |menu| menu.left_0(), |menu| menu.right_0());
+        let menu = menu.unwrap_or_else(|| {
+            let menu = Menu::new(SharedString::from(format!("{key}-menu"))).w(width);
+            match scroll_after {
+                Some(height) => {
+                    let view = window.current_view();
+                    let scrollbar = window.use_keyed_state(
+                        SharedString::from(format!("{key}-menu-scroll")),
+                        cx,
+                        |_, _| Scrollbar::inset().watching(view),
+                    );
+                    menu.max_h(height).scrollbar(scrollbar)
+                }
+                None => menu,
+            }
+        });
+        let menu = menu.items(items).top(drop).when_else(
+            left,
+            |menu| menu.left_0(),
+            |menu| menu.right_0(),
+        );
 
         let mut popover = Popover::new(key, group)
             .button(button)
             .selected(selected)
             .menu(menu)
-            .when(!sticky, Popover::commands);
+            .when(!sticky, Popover::commands)
+            .when_some(on_open, |popover, on_open| popover.on_open(on_open));
         *popover.style() = style;
         popover
     }

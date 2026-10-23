@@ -1,28 +1,32 @@
 use std::rc::Rc;
 
 use ui::{
-    ActiveTheme as _, Button, Card, Deck, DraggedPin, Edge, MenuItem, Panel, Picker, Pin,
-    Pinnable as _, Popup, SNUG, Scroller, Shield, Side, Spot, Tabs, Text, Vacancy, drop_gap,
-    drop_marker,
+    ActiveTheme as _, Card, Deck, DraggedPin, Edge, MenuItem, Panel, Picker, Pin, Pinnable as _,
+    Popup, SNUG, Scroller, Shield, Side, Spot, Tabs, Text, Vacancy, drop_gap, drop_marker,
 };
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, ElementId, Entity, Hsla, MouseButton, MouseDownEvent,
+    AnyElement, App, Context, DragMoveEvent, ElementId, Entity, MouseButton, MouseDownEvent,
     Pixels, Point, Render, ScrollHandle, svg,
 };
 use gpui::{Window, div, px};
 use router::{
-    Destination, LibraryTab, NavEntry, Navigation, NavigationEvent, SettingsTab, navigate,
+    Destination, LibraryTab, NavEntry, Navigation, NavigationEvent, SettingsPage, navigate,
+    open_settings,
 };
 use state::{AppSettings, Library, Origin, PinSort, Pins, Playback, Session, Shelf, Sonora};
 
 use crate::shared::menus::{ItemMenu, item_menu};
+use crate::shared::nav::nav_row;
 
 /// The one drag list the pinned section keeps, so a pin dropped anywhere in it lands in order.
 const PINS: &str = "sidebar-pins";
 
-const NAV: [(Option<NavEntry>, &str, Destination); 6] = [
+/// The sidebar's navigation rows in order: the entry that can hide each, its icon and where it goes.
+/// Settings has no entry, so it is always shown, and it opens on the settings page last visited
+/// rather than on the one named here.
+pub(crate) const NAV: [(Option<NavEntry>, &str, Destination); 6] = [
     (Some(NavEntry::Home), "icons/house.svg", Destination::Home),
     (
         Some(NavEntry::Search),
@@ -47,7 +51,7 @@ const NAV: [(Option<NavEntry>, &str, Destination); 6] = [
     (
         None,
         "icons/settings.svg",
-        Destination::Settings(SettingsTab::General),
+        Destination::Settings(SettingsPage::General),
     ),
 ];
 
@@ -117,10 +121,12 @@ impl SidebarLeft {
         cx.observe(&library, |_, _, cx| cx.notify()).detach();
         cx.observe(&pins, |_, _, cx| cx.notify()).detach();
         cx.observe(&playback, |_, _, cx| cx.notify()).detach();
+        let chrome = super::Chrome::entity(cx);
+        cx.observe(&chrome, |_, _, cx| cx.notify()).detach();
         let me = cx.entity_id();
         let playlist_scrollbar = cx.new(|_| ui::Scrollbar::inset().watching(me));
         let scrollbar = cx.new(|_| ui::Scrollbar::new(ScrollHandle::new()).watching(me));
-        let width = px(settings.read(cx).sidebar_width()).clamp(MIN_WIDTH, MAX_WIDTH);
+        let width = sidebar_width(settings.read(cx));
         let open = settings.read(cx).sidebar_open();
         let pinned_open = settings.read(cx).sidebar_pinned_open();
         let trail = router::trail(cx);
@@ -559,7 +565,10 @@ impl SidebarLeft {
                 })),
             None => row
                 .when(active, |button| button.bg(accent))
-                .on_click(move |_, _, cx| navigate(destination.clone(), cx)),
+                .on_click(move |_, _, cx| match destination.in_settings() {
+                    true => open_settings(cx),
+                    false => navigate(destination.clone(), cx),
+                }),
         }
         .into_any_element()
     }
@@ -628,6 +637,7 @@ impl Render for SidebarLeft {
             .limits(MIN_WIDTH, MAX_WIDTH)
             .reach(self.ceiling(window, cx))
             .clears_scrollbar()
+            .grip_above(super::Chrome::bottom(cx))
             .on_resize(cx.listener(|this, width: &Pixels, _, cx| {
                 this.width = *width;
                 this.persist(cx);
@@ -667,6 +677,7 @@ impl Render for SidebarLeft {
                     .min_h_0()
                     .child(
                         Scroller::new("sidebar-left-rows", &self.scrollbar)
+                            .bottom_inset(super::Chrome::bottom(cx))
                             .size_full()
                             .child(
                                 div()
@@ -681,7 +692,15 @@ impl Render for SidebarLeft {
                                     .children(rows),
                             ),
                     )
-                    .children(ui::return_top("sidebar-return-top", &self.scrollbar, cx)),
+                    .children(
+                        ui::return_top("sidebar-return-top", &self.scrollbar, cx).map(|perch| {
+                            match super::Chrome::bottom(cx) > Pixels::ZERO {
+                                true => perch
+                                    .bottom(super::Chrome::bottom(cx) + theme.metrics.pad * 1.5),
+                                false => perch,
+                            }
+                        }),
+                    ),
             )
             .children(self.menu(cx));
 
@@ -709,6 +728,11 @@ impl Render for SidebarLeft {
                 .into_any_element(),
         }
     }
+}
+
+/// How wide the left sidebar stands from its saved width, which the settings rail matches.
+pub(crate) fn sidebar_width(settings: &AppSettings) -> Pixels {
+    px(settings.sidebar_width()).clamp(MIN_WIDTH, MAX_WIDTH)
 }
 
 /// The kind of an entry, behind a dimmed pin when it is one of the pinned ones.
@@ -782,20 +806,9 @@ fn chevron(open: bool) -> &'static str {
     }
 }
 
-fn nav_row(id: impl Into<ElementId>, key: &'static str, tint: Hsla, accent: Hsla) -> Button {
-    Button::new(id)
-        .ghost()
-        .label(i18n::lookup(key, None))
-        .tint(tint)
-        .gap_2p5()
-        .justify_start()
-        .hover(move |style| style.bg(accent))
-        .active(move |style| style.bg(accent))
-}
-
 #[cfg(test)]
 mod tests {
-    use router::{Destination, LibraryTab, SettingsTab};
+    use router::{Destination, LibraryTab, SettingsPage};
 
     use super::expanded;
 
@@ -810,7 +823,7 @@ mod tests {
             (false, true)
         );
         assert_eq!(
-            expanded(&Destination::Settings(SettingsTab::General)),
+            expanded(&Destination::Settings(SettingsPage::Providers)),
             (false, false)
         );
     }

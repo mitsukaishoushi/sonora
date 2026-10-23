@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use lofty::config::{ParseOptions, WriteOptions};
-use lofty::file::{AudioFile, FileType, TaggedFileExt};
+use lofty::file::{AudioFile, FileType, TaggedFile, TaggedFileExt};
 use lofty::id3::v2::{Frame, SyncTextContentType, SynchronizedTextFrame, TimestampFormat};
 use lofty::mpeg::MpegFile;
 use lofty::prelude::{Accessor, ItemKey};
@@ -15,7 +15,7 @@ use lofty::tag::{ItemValue, Tag, TagItem};
 
 use crate::engine::Loudness;
 use crate::lyrics::lrc;
-use crate::{Lyrics, LyricsLine, LyricsWord, TrackTags, Voice};
+use crate::{Encoding, Lyrics, LyricsLine, LyricsWord, TrackTags, Voice};
 
 use super::wire;
 
@@ -53,14 +53,43 @@ pub fn read(path: &Path) -> Result<TrackTags> {
     })
 }
 
-/// The ReplayGain a file's tags carry, from whichever of its tags has it. The track gain wins,
-/// and the album gain stands in when that is all the file was tagged with.
-pub fn loudness(path: &Path) -> Option<Loudness> {
-    let tagged = Probe::open(path)
+/// A file's tags and properties without its cover art, for `encoding` and `loudness`.
+pub fn tagged(path: &Path) -> Option<TaggedFile> {
+    Probe::open(path)
         .ok()?
         .options(ParseOptions::new().read_cover_art(false))
         .read()
-        .ok()?;
+        .ok()
+}
+
+/// How a file is encoded, with the bit depth of a lossless codec or the bit rate of a lossy one.
+/// `None` when the file leaves out the figure its codec is shown with.
+pub fn encoding(tagged: &TaggedFile) -> Option<Encoding> {
+    let properties = tagged.properties();
+    let depth = properties.bit_depth();
+    let kbps = properties.audio_bitrate();
+    Some(match tagged.file_type() {
+        FileType::Flac => Encoding::Flac {
+            depth: depth?,
+            rate: properties.sample_rate()?,
+        },
+        FileType::Wav | FileType::Aiff => Encoding::Pcm { depth: depth? },
+        FileType::Mpeg => Encoding::Mp3 { kbps: kbps? },
+        FileType::Aac => Encoding::Aac { kbps: kbps? },
+        // An MP4 holds AAC or ALAC, and only ALAC has a bit depth.
+        FileType::Mp4 => match depth {
+            Some(depth) => Encoding::Alac { depth },
+            None => Encoding::Aac { kbps: kbps? },
+        },
+        FileType::Vorbis => Encoding::Vorbis { kbps: kbps? },
+        FileType::Opus => Encoding::Opus { kbps: kbps? },
+        _ => Encoding::Other,
+    })
+}
+
+/// The ReplayGain a file's tags carry, from whichever of its tags has it. The track gain wins,
+/// and the album gain stands in when that is all the file was tagged with.
+pub fn loudness(tagged: &TaggedFile) -> Option<Loudness> {
     tagged.tags().iter().find_map(|tag| {
         let read = |key| tag.get_string(key).and_then(decibels);
         let (gain, peak) = match read(ItemKey::ReplayGainTrackGain) {

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use gpui::{App, Context, Entity, Task};
 use music::progress::Progress;
 
-use crate::Session;
+use crate::{Outcome, Session, Toast, Toasts};
 
 /// How often the progress is sampled while a scan runs. The count lives in atomics the workers
 /// bump, so this is only how often the screen catches up with them.
@@ -23,6 +23,8 @@ pub struct Scan {
     /// Whether the settings page has had a chance to show `done`, which is what lets leaving the
     /// page clear it.
     seen: bool,
+    /// Whether the settings page is open, which shows a scan's progress itself.
+    on_settings: bool,
     poll: Option<Task<()>>,
 }
 
@@ -40,6 +42,7 @@ impl Scan {
             asked: false,
             done: None,
             seen: false,
+            on_settings: false,
             poll: None,
         };
         scan.follow(scanning, cx);
@@ -69,6 +72,7 @@ impl Scan {
     /// Follows the settings page: arriving marks a finished scan as shown, leaving forgets it.
     /// Switching category counts as arriving, so only leaving the page clears the note.
     pub fn viewing_settings(&mut self, viewing: bool, cx: &mut Context<Self>) {
+        self.on_settings = viewing;
         match viewing {
             true => self.seen = self.done.is_some(),
             false if self.seen => {
@@ -78,6 +82,18 @@ impl Scan {
             }
             false => {}
         }
+    }
+
+    /// Reports a scan the user started that found `songs`, unless the settings page is open to
+    /// show it.
+    pub(crate) fn finished(&self, songs: usize, cx: &mut Context<Self>) {
+        if self.on_settings {
+            return;
+        }
+        Toasts::post(
+            Toast::new(Outcome::Done, "toast-library-scanned").count(songs),
+            cx,
+        );
     }
 
     /// Picks up a scan starting or ending. A scan the user asked for leaves its duration behind.

@@ -214,15 +214,16 @@ impl RenderOnce for Picks {
                     .items_end()
                     .justify_between()
                     .gap_4()
-                    .px_3()
-                    .py_2()
+                    .px_4()
+                    .pt_4()
+                    .pb_3()
                     .border_b_1()
                     .border_color(theme.border)
                     .child(
                         div()
                             .flex()
                             .flex_col()
-                            .gap_0p5()
+                            .gap_0()
                             .children(self.eyebrow.map(|label| eyebrow(label, cx)))
                             .child(heading(i18n::lookup(self.title, None), cx)),
                     )
@@ -231,6 +232,7 @@ impl RenderOnce for Picks {
                             .flex()
                             .items_center()
                             .gap_1()
+                            .pb_1()
                             .child(
                                 Button::new(SharedString::from(format!("{id}-previous")))
                                     .small()
@@ -275,6 +277,7 @@ impl RenderOnce for Picks {
                         this.children((0..shape.columns).map(|column| {
                             column_shell(column, theme.border).children((0..ROWS).map(|slot| {
                                 let place = start + column * ROWS + slot;
+
                                 match &rows {
                                     Rows::Tracks(tracks) if place < tracks.len() => TrackCard::new(
                                         id,
@@ -287,8 +290,10 @@ impl RenderOnce for Picks {
                                     .start(on_start.clone())
                                     .render(cx)
                                     .into_any_element(),
+
                                     Rows::Mixed(items) if place < items.len() => {
                                         let context = on_context_menu.clone();
+
                                         cards::listed(
                                             (id, place),
                                             &items[place],
@@ -302,6 +307,7 @@ impl RenderOnce for Picks {
                                         })
                                         .into_any_element()
                                     }
+
                                     _ => div().flex_none().h(row).into_any_element(),
                                 }
                             }))
@@ -355,6 +361,7 @@ mod tests {
         for count in 0..80 {
             for width in [px(279.), px(560.), px(840.)] {
                 let shape = Shape::new(width, count);
+
                 assert_eq!(shape.slots(), shape.columns * ROWS);
                 assert!(shape.pages * shape.slots() >= count);
                 assert!((shape.pages - 1) * shape.slots() < count.max(1));

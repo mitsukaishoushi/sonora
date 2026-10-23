@@ -2,6 +2,7 @@ mod accounts;
 mod auth;
 mod client;
 mod genres;
+mod links;
 mod lyrics;
 mod playback;
 mod radio;
@@ -21,8 +22,8 @@ use ytmusic::YtMusic;
 use crate::youtube::playback::Factory;
 
 use crate::{
-    Capabilities, InputSource, MusicProvider, PromptSink, ProviderSession, Shape, SignIn,
-    SignInPrompt, UserProfile, WebSignIn, credentials,
+    Capabilities, InputSource, MusicProvider, PlaybackFactory, PromptSink, ProviderSession, Shape,
+    SignIn, SignInPrompt, UserProfile, WebSignIn, credentials,
 };
 pub use client::YouTubeClient;
 pub use lyrics::YouTubeLyrics;
@@ -52,14 +53,34 @@ enum Saved {
     Guest,
 }
 
+/// How long a track waits on a minting page that is already attested. Minting there takes
+/// milliseconds and the rest is the app's polling, so a track usually starts on a real token.
+const WARM_WAIT: Duration = Duration::from_secs(2);
+/// How often a track waiting on a warm page looks for its token.
+const WARM_POLL: Duration = Duration::from_millis(50);
+
 /// Asks the app for the proof-of-origin token the client needs. Every answer comes out of
-/// `music::potoken`, so the client never waits on the browser window that fills it.
+/// `music::potoken`. The client waits up to [`WARM_WAIT`] when the app has an attested page open,
+/// and never on a page that still has to load.
 struct Minter;
 
 #[async_trait]
 impl ytmusic::Minter for Minter {
     async fn mint(&self, binding: &str) -> Option<String> {
-        crate::potoken::token(binding)
+        if let Some(token) = crate::potoken::token(binding) {
+            return Some(token);
+        }
+        if !crate::potoken::warm() {
+            return None;
+        }
+        let deadline = std::time::Instant::now() + WARM_WAIT;
+        while std::time::Instant::now() < deadline {
+            tokio::time::sleep(WARM_POLL).await;
+            if let Some(token) = crate::potoken::minted(binding) {
+                return Some(token);
+            }
+        }
+        None
     }
 }
 
@@ -134,6 +155,7 @@ impl YouTubeProvider {
             authenticated: true,
             capabilities: Capabilities {
                 playcounts: false,
+                qualities: playback::QUALITIES,
                 ..Capabilities::ALL
             },
         }
@@ -152,6 +174,7 @@ impl YouTubeProvider {
             authenticated: false,
             capabilities: Capabilities {
                 playcounts: false,
+                qualities: playback::QUALITIES,
                 ..Capabilities::ALL
             },
         }
@@ -304,6 +327,10 @@ impl MusicProvider for YouTubeProvider {
         "youtube"
     }
 
+    fn link(&self, link: &str) -> Option<crate::link::Linked> {
+        links::read(link)
+    }
+
     fn reach(&self) -> Option<String> {
         Some("music.youtube.com".to_owned())
     }
@@ -322,6 +349,18 @@ impl MusicProvider for YouTubeProvider {
 
     fn stored_guest(&self) -> bool {
         matches!(self.saved(), Some(Saved::Guest))
+    }
+
+    fn offline_playback(&self) -> Option<Arc<dyn PlaybackFactory>> {
+        let api = match self.saved()? {
+            Saved::Cookies {
+                cookies,
+                authuser,
+                page_id,
+            } => self.cookie_client(&cookies, authuser, page_id.as_deref()),
+            Saved::Guest => self.guest_client(),
+        };
+        Some(Arc::new(Factory::new(api)))
     }
 
     async fn restore(&self) -> Result<Option<ProviderSession>> {

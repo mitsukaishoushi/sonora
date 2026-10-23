@@ -1,3 +1,4 @@
+use crate::shared::device_code::device_code;
 use crate::shared::popups::{AccountPicker, CookiePrompt};
 use gpui::prelude::*;
 use gpui::{
@@ -334,27 +335,7 @@ impl LoginView {
                     .text_color(theme.muted_foreground)
                     .child(t!("login-device-code", url = &url)),
             )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_size(theme.text(Text::Title))
-                            .font_weight(FontWeight::BOLD)
-                            .child(SharedString::from(code.clone())),
-                    )
-                    .child(
-                        Button::new("copy-code")
-                            .icon("icons/copy.svg")
-                            .ghost()
-                            .small()
-                            .on_click(move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
-                            }),
-                    ),
-            )
+            .child(device_code(code, cx))
     }
 
     fn url_prompt(&self, url: String) -> impl IntoElement {

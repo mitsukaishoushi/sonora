@@ -125,6 +125,7 @@ impl Render for SidebarRight {
         Panel::new("sidebar-right", Side::Right, self.width)
             .limits(MIN_WIDTH, MAX_WIDTH)
             .reach(super::cap(MIN_WIDTH, MAX_WIDTH, MIN_CONTENT, window))
+            .grip_above(super::Chrome::bottom(cx))
             .on_resize(cx.listener(|this, width: &Pixels, _, cx| {
                 this.width = *width;
                 this.persist(cx);

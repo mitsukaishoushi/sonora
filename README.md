@@ -15,7 +15,7 @@
 </p>
 
 [![Build](https://img.shields.io/github/actions/workflow/status/sonorahq/sonora/release.yml?style=flat-square&label=build)](https://github.com/sonorahq/sonora/actions/workflows/release.yml)
-[![License](https://img.shields.io/github/license/sonorahq/sonora?style=flat-square&label=license)](./COPYING)
+[![License](https://img.shields.io/github/license/sonorahq/sonora?style=flat-square&label=license&cacheSeconds=3600)](./COPYING)
 ![Installs](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fsonora-stats.nolight.dev%2Fcount&query=%24.count&label=Installs&color=blue&style=flat-square)
 \
 [![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/a8N8Tx23rV)
@@ -60,7 +60,7 @@ Stream from your favorite services and play local files — all in one **native*
 
 ## Features
 
-- **Apple Music, Spotify, YouTube Music, Deezer, Subsonic/Navidrome** and local playback
+- **Apple Music, Spotify, YouTube Music, Deezer, Tidal, Subsonic/Navidrome** and local playback
 - Gapless playback, audio normalization, shuffle, sleep timer
 - Synced/karaoke lyrics, background vocals, and romanization
 - Scrobbling with LastFM, ListenBrainz, LibreFM, and Maloja
@@ -131,17 +131,21 @@ for you.
 
 ### Nix
 
-The flake packages the latest tagged release binary or builds from source if unavailable for your platform.
-
 ```nix
 inputs.sonora.url = "github:sonorahq/sonora";
 ```
 
 ```text
-inputs.sonora.packages.${system}.default
-inputs.sonora.packages.${system}.sonora (build from source)
-inputs.sonora.packages.${system}.sonora-bin (prebuilt, if available)
+inputs.sonora.packages.${system}.default     (prebuilt where available, else from source)
+inputs.sonora.packages.${system}.sonora      (same as default)
+inputs.sonora.packages.${system}.sonora-bin  (prebuilt, x86_64-linux, aarch64-linux, aarch64-darwin)
+inputs.sonora.packages.${system}.sonora-src  (always built from source)
 ```
+
+The prebuilt package downloads the latest tagged release. `sonora-src` compiles whatever
+revision of the flake you point it at, so pin the input to a tag such as
+`github:sonorahq/sonora/v0.43.0` to build a release. Building from source on macOS needs Xcode
+added to the Nix store, because the shaders compile with Apple's Metal compiler.
 
 You can set configuration options via the included Home Manager module under `programs.sonora`:
 
@@ -200,21 +204,21 @@ AI-assisted proofreading and translation of human-written text are permitted.
 
 | Language | Translated | Coverage |
 | --- | --- | --- |
-| English (`en-US`) | 755/755 | 100% |
-| Deutsch (`de`) | 628/755 | 83% |
-| Español (`es`) | 690/755 | 91% |
-| Français (`fr`) | 749/755 | 99% |
-| Italiano (`it`) | 605/755 | 80% |
-| Bahasa Indonesia (`id`) | 605/755 | 80% |
-| 日本語 (`ja`) | 605/755 | 80% |
-| Русский (`ru`) | 711/755 | 94% |
-| Українська (`uk`) | 711/755 | 94% |
-| Polski (`pl`) | 711/755 | 94% |
-| Čeština (`cs`) | 743/755 | 98% |
-| Português (Brasil) (`pt-BR`) | 605/755 | 80% |
-| 简体中文 (`zh-CN`) | 605/755 | 80% |
-| Türkçe (`tr`) | 605/755 | 80% |
-| Shqip (`sq`) | 714/755 | 95% |
+| English (`en-US`) | 1114/1114 | 100% |
+| Deutsch (`de`) | 1114/1114 | 100% |
+| Español (`es`) | 1114/1114 | 100% |
+| Français (`fr`) | 1114/1114 | 100% |
+| Italiano (`it`) | 1114/1114 | 100% |
+| Bahasa Indonesia (`id`) | 1114/1114 | 100% |
+| 日本語 (`ja`) | 1114/1114 | 100% |
+| Русский (`ru`) | 1114/1114 | 100% |
+| Українська (`uk`) | 1114/1114 | 100% |
+| Polski (`pl`) | 1114/1114 | 100% |
+| Čeština (`cs`) | 1114/1114 | 100% |
+| Português (Brasil) (`pt-BR`) | 1114/1114 | 100% |
+| 简体中文 (`zh-CN`) | 1114/1114 | 100% |
+| Türkçe (`tr`) | 1114/1114 | 100% |
+| Shqip (`sq`) | 1114/1114 | 100% |
 
 <!-- i18n:end -->
 
@@ -236,9 +240,16 @@ Sonora is built with the help of some incredible open-source projects, including
 - [librespot](https://github.com/librespot-org/librespot) — Spotify playback and library integration.
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) — certain YouTube ideas implemented in [ytmusic-rs](https://github.com/sonorahq/ytmusic-rs) :)
 
-## Code signing
+## Code signing policy
 
-Sonora has applied for code signing through SignPath Foundation. Current releases are not yet signed through SignPath Foundation. If approved, signed releases will use free code signing provided by SignPath.io, with a certificate by SignPath Foundation.
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+The Windows executable and installer are built by GitHub Actions from this repository and signed
+through SignPath.
+
+- Reviewers: members of sonorahq
+- Approvers: [@nolight132](https://github.com/nolight132)
 
 ## License
 

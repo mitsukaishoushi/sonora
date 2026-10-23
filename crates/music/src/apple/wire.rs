@@ -24,7 +24,7 @@ use serde_json::value::RawValue;
 
 use crate::{
     Album, Artist, ArtistProfile, ArtistRef, PinTarget, PinTargetKind, Playlist, ReleaseType,
-    SavedArtist, Track,
+    SavedArtist, Track, calendar,
 };
 
 /// The size artwork is asked to render at, and the larger one for a page header.
@@ -202,6 +202,9 @@ pub struct Attributes<'a> {
 #[serde(default, rename_all = "camelCase", bound(deserialize = "'de: 'a"))]
 pub struct PlayParams<'a> {
     pub catalog_id: Leaf<'a>,
+    /// The catalog song a library row plays as now. It differs from `catalog_id` when Apple
+    /// pulled the old id and delivered the song again under a new one.
+    pub reporting_id: Leaf<'a>,
 }
 
 #[derive(Default, Deserialize)]
@@ -691,49 +694,7 @@ pub fn artwork(attributes: &Attributes, size: u32) -> Option<String> {
 /// An ISO-8601 stamp as seconds since the epoch. Apple writes them two ways, `2026-09-15` and
 /// `2026-09-15T12:03:39Z`, and only the date part matters for sorting a library.
 pub fn moment(stamp: Option<&str>) -> Option<i64> {
-    let stamp = stamp?;
-    let (date, time) = match stamp.split_once('T') {
-        Some((date, time)) => (date, time),
-        None => (stamp, ""),
-    };
-    let mut parts = date.split('-');
-    let year: i64 = parts.next()?.parse().ok()?;
-    let month: i64 = parts.next().unwrap_or("1").parse().unwrap_or(1);
-    let day: i64 = parts.next().unwrap_or("1").parse().unwrap_or(1);
-    let (time, zone) = zone_of(time.trim_end_matches('Z'));
-    let mut clock = time.split(':');
-    let hour: i64 = clock.next().unwrap_or("0").parse().unwrap_or(0);
-    let minute: i64 = clock.next().unwrap_or("0").parse().unwrap_or(0);
-    let second: i64 = clock
-        .next()
-        .and_then(|second| second.split('.').next())
-        .unwrap_or("0")
-        .parse()
-        .unwrap_or(0);
-    Some(days(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second - zone)
-}
-
-fn zone_of(time: &str) -> (&str, i64) {
-    let Some(at) = time.rfind(['+', '-']).filter(|&at| at > 0) else {
-        return (time, 0);
-    };
-    let (clock, zone) = time.split_at(at);
-    let sign = if zone.starts_with('-') { -1i64 } else { 1 };
-    let zone = zone.trim_start_matches(['+', '-']);
-    let mut parts = zone.split(':');
-    let hours: i64 = parts.next().unwrap_or("0").parse().unwrap_or(0);
-    let minutes: i64 = parts.next().unwrap_or("0").parse().unwrap_or(0);
-    (clock, sign * (hours * 3_600 + minutes * 60))
-}
-
-/// Days from the epoch to a civil date, by Howard Hinnant's algorithm.
-fn days(year: i64, month: i64, day: i64) -> i64 {
-    let year = year - i64::from(month <= 2);
-    let era = year.div_euclid(400);
-    let yoe = year - era * 400;
-    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
+    calendar::seconds(stamp?)
 }
 
 /// The artists of a resource. Apple only names them in one string unless the relationship was
@@ -777,12 +738,13 @@ pub fn playlist_track(row: &Resource) -> Option<Track> {
 
 /// One library song, which plays through the catalog id its play parameters name. A library row
 /// without one is an upload, and this path has no way to play it. A row whose catalog
-/// relationship was asked for and came back empty names a song Apple has since pulled: the
-/// play parameters still carry its id, but web playback refuses it, so it is listed unplayable.
+/// relationship was asked for and came back empty names an id Apple has pulled, which web
+/// playback refuses. It plays through the reporting id when Apple delivered the song again
+/// under a new one, and is listed unplayable when it did not.
 pub fn library_song(value: &Resource) -> Option<Track> {
     let attributes = value.attributes.as_ref();
-    let id = attributes
-        .and_then(|attributes| attributes.play_params.as_ref())
+    let params = attributes.and_then(|attributes| attributes.play_params.as_ref());
+    let id = params
         .and_then(|params| params.catalog_id.as_str())
         .or_else(|| catalog(value)?.id.as_str())?
         .to_owned();
@@ -791,11 +753,18 @@ pub fn library_song(value: &Resource) -> Option<Track> {
     // that album joined the library, which is also the order Apple itself sorts songs by.
     let mut track = match catalog(value) {
         Some(found) => song_as(found, id)?,
-        None => {
-            let mut track = song_as(value, id)?;
-            track.playable = value.relationships.catalog.data.is_none();
-            track
-        }
+        None if value.relationships.catalog.data.is_none() => song_as(value, id)?,
+        None => match params
+            .and_then(|params| params.reporting_id.as_str())
+            .filter(|replacement| *replacement != id)
+        {
+            Some(replacement) => song_as(value, replacement.to_owned())?,
+            None => {
+                let mut track = song_as(value, id)?;
+                track.playable = false;
+                track
+            }
+        },
     };
     track.added_at = attributes
         .and_then(|attributes| moment(attributes.date_added.as_str()))

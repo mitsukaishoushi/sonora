@@ -2,15 +2,23 @@ use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result};
-use gpui::{Context, Entity, Task};
+use gpui::{App, Context, Entity, Task};
 use music::{ArtistRef, Track};
-use rusqlite::{Connection, params};
+use rusqlite::types::Value;
+use rusqlite::{Connection, params, params_from_iter};
 use storage::Database;
 
 use crate::playback::PlaybackEvent;
-use crate::{Io, Playback, Session, SessionEvent, SessionState, join};
+use crate::{Io, Outcome, Playback, Session, SessionEvent, SessionState, Toast, Toasts, join};
 
 const LOCAL_LIMIT: usize = 500;
+/// Every column of `plays`, in the order a [`Row`] holds them.
+const COLUMNS: &str = "scope, provider, track_id, played_at, name, playable, artists, \
+                       artist_refs, album, album_id, cover, duration_ms, explicit";
+const COLUMN_COUNT: usize = 13;
+
+/// One `plays` row as stored, column by column, so a removed play goes back exactly as it was.
+type Row = Vec<Value>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HistoryState {
@@ -84,14 +92,74 @@ impl Store {
         Ok(())
     }
 
-    fn delete(&self, scope: &str, track_id: &str, played_at: i64) -> Result<()> {
-        self.open()?
+    /// Runs one edit and says how it went.
+    fn apply(&self, edit: Edit) -> Applied {
+        match edit {
+            Edit::Remove { scope, track } => {
+                let rows = self.take(&scope, &track);
+                Applied::Removed { scope, track, rows }
+            }
+            Edit::Restore(rows) => Applied::Restored(self.put(&rows)),
+            Edit::Wipe(scope) => Applied::Wiped(self.wipe(&scope)),
+        }
+    }
+
+    /// Deletes the plays of `track` in the second the list shows for it, and returns the rows
+    /// it deleted.
+    fn take(&self, scope: &str, track: &Track) -> Result<Vec<Row>> {
+        let (Some(track_id), Some(played_at)) = (track.id.as_deref(), track.added_at) else {
+            return Ok(Vec::new());
+        };
+        let played_at = played_at.saturating_mul(1_000);
+        let window = params![scope, track_id, played_at, played_at.saturating_add(1_000)];
+        let mut connection = self.open()?;
+        let transaction = connection
+            .transaction()
+            .context("cannot start removing a play")?;
+        let rows = {
+            let mut query = transaction
+                .prepare(&format!(
+                    "SELECT {COLUMNS} FROM plays
+                     WHERE scope = ? AND track_id = ? AND played_at >= ? AND played_at < ?"
+                ))
+                .context("cannot prepare a play read")?;
+            query
+                .query_map(window, |row| {
+                    (0..COLUMN_COUNT)
+                        .map(|column| row.get::<_, Value>(column))
+                        .collect::<rusqlite::Result<Row>>()
+                })
+                .context("cannot read a play")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("cannot decode a play")?
+        };
+        transaction
             .execute(
                 "DELETE FROM plays
                  WHERE scope = ? AND track_id = ? AND played_at >= ? AND played_at < ?",
-                params![scope, track_id, played_at, played_at + 1_000],
+                window,
             )
             .context("cannot remove a play")?;
+        transaction.commit().context("cannot remove a play")?;
+        Ok(rows)
+    }
+
+    /// Writes back rows that [`Self::take`] returned. A row already there is kept as it is.
+    fn put(&self, rows: &[Row]) -> Result<()> {
+        let mut connection = self.open()?;
+        let transaction = connection
+            .transaction()
+            .context("cannot start restoring plays")?;
+        let insert = format!(
+            "INSERT OR IGNORE INTO plays ({COLUMNS}) VALUES ({})",
+            vec!["?"; COLUMN_COUNT].join(", ")
+        );
+        for row in rows {
+            transaction
+                .execute(&insert, params_from_iter(row))
+                .context("cannot restore a play")?;
+        }
+        transaction.commit().context("cannot restore plays")?;
         Ok(())
     }
 
@@ -148,6 +216,36 @@ impl Store {
     }
 }
 
+/// A write to the play log. Edits run in batches, one batch at a time and in the order they
+/// were made, so an undo never lands before the removal it reverses.
+enum Edit {
+    /// Deletes one play and keeps its rows so it can be put back.
+    Remove {
+        scope: String,
+        track: Box<Track>,
+    },
+    Restore(Vec<Row>),
+    Wipe(String),
+}
+
+/// How an [`Edit`] went.
+enum Applied {
+    Removed {
+        scope: String,
+        track: Box<Track>,
+        rows: Result<Vec<Row>>,
+    },
+    Restored(Result<()>),
+    Wiped(Result<()>),
+}
+
+/// A play removed while the Removed toast is up, kept so its Undo can put the play back.
+struct Removal {
+    scope: String,
+    track: Box<Track>,
+    rows: Vec<Row>,
+}
+
 pub struct History {
     session: Entity<Session>,
     playback: Entity<Playback>,
@@ -158,6 +256,16 @@ pub struct History {
     pending: Vec<Track>,
     active: Option<(String, String)>,
     task: Option<Task<()>>,
+    /// Edits waiting for the batch under way to finish.
+    edits: Vec<Edit>,
+    writing: Option<Task<()>>,
+    /// Plays removed since the Removed toast went up, which its Undo puts back.
+    removals: Vec<Removal>,
+    /// The Removed toast, while it may still be up.
+    removal_toast: Option<usize>,
+    /// Bumped whenever the list is reset, so a removal that lands afterwards offers no undo
+    /// and is not put back into a list that was cleared.
+    era: u64,
 }
 
 impl History {
@@ -171,7 +279,7 @@ impl History {
         cx.subscribe(&session, |this, _, event, cx| match event {
             SessionEvent::SignedIn | SessionEvent::Reconnected => this.refresh(cx),
             SessionEvent::SignedOut => this.reset(cx),
-            SessionEvent::LocalChanged => {}
+            SessionEvent::WentOffline | SessionEvent::LocalChanged => {}
         })
         .detach();
         cx.subscribe(&playback, |this, _, event, cx| match event {
@@ -191,6 +299,11 @@ impl History {
             pending: Vec::new(),
             active: None,
             task: None,
+            edits: Vec::new(),
+            writing: None,
+            removals: Vec::new(),
+            removal_toast: None,
+            era: 0,
         };
         history.refresh(cx);
         history
@@ -204,31 +317,29 @@ impl History {
         &self.tracks
     }
 
+    /// Removes one play and offers to put it back. A play no longer in the list, such as one
+    /// removed a moment ago, is left alone.
     pub fn remove(&mut self, track: &Track, cx: &mut Context<Self>) {
-        let (Some(track_id), Some(played_at)) = (track.id.clone(), track.added_at) else {
+        if track.id.is_none() || track.added_at.is_none() {
             return;
-        };
+        }
         let Some(scope) = self.scope(cx) else {
             return;
         };
-        self.tracks
-            .retain(|held| held.id != track.id || held.added_at != track.added_at);
-        self.pending
-            .retain(|held| held.id != track.id || held.added_at != track.added_at);
+        let same = |held: &Track| held.id == track.id && held.added_at == track.added_at;
+        let Some(at) = self.tracks.iter().position(same) else {
+            return;
+        };
+        let track = self.tracks.remove(at);
+        self.pending.retain(|held| !same(held));
         cx.notify();
-
-        let store = self.store.clone();
-        let played_at = played_at.saturating_mul(1_000);
-        self.io.spawn(async move {
-            let removed =
-                tokio::task::spawn_blocking(move || store.delete(&scope, &track_id, played_at))
-                    .await;
-            match removed {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => log::warn!("history: cannot remove a play: {error:#}"),
-                Err(error) => log::warn!("history: remove task failed: {error}"),
-            }
-        });
+        self.write(
+            Edit::Remove {
+                scope,
+                track: Box::new(track),
+            },
+            cx,
+        );
     }
 
     pub fn clear(&mut self, cx: &mut Context<Self>) {
@@ -236,18 +347,168 @@ impl History {
             return;
         };
         self.reset(cx);
-
-        let store = self.store.clone();
-        self.io.spawn(async move {
-            let cleared = tokio::task::spawn_blocking(move || store.wipe(&scope)).await;
-            match cleared {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => log::warn!("history: cannot clear plays: {error:#}"),
-                Err(error) => log::warn!("history: clear task failed: {error}"),
-            }
-        });
+        self.write(Edit::Wipe(scope), cx);
     }
 
+    /// Queues an edit, and starts a batch unless one is under way.
+    fn write(&mut self, edit: Edit, cx: &mut Context<Self>) {
+        self.edits.push(edit);
+        if self.writing.is_none() {
+            self.flush(cx);
+        }
+    }
+
+    /// Runs every queued edit as one batch, then the edits queued meanwhile.
+    fn flush(&mut self, cx: &mut Context<Self>) {
+        let edits = std::mem::take(&mut self.edits);
+        if edits.is_empty() {
+            self.writing = None;
+            return;
+        }
+        let store = self.store.clone();
+        let io = self.io.clone();
+        let era = self.era;
+        self.writing = Some(cx.spawn(async move |this, cx| {
+            let applied = io
+                .spawn_blocking(move || {
+                    edits
+                        .into_iter()
+                        .map(|edit| store.apply(edit))
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                match applied {
+                    Ok(applied) => this.applied(applied, era, cx),
+                    Err(error) => log::warn!("history: write task failed: {error}"),
+                }
+                this.flush(cx);
+            })
+            .ok();
+        }));
+    }
+
+    /// Takes in a finished batch. Removals offer an undo, and a removal that failed puts its
+    /// play back, unless the list was reset since the batch started.
+    fn applied(&mut self, applied: Vec<Applied>, era: u64, cx: &mut Context<Self>) {
+        let current = era == self.era;
+        let mut removed = Vec::new();
+        for done in applied {
+            match done {
+                Applied::Removed {
+                    scope,
+                    track,
+                    rows: Ok(rows),
+                } => {
+                    if current {
+                        removed.push(Removal { scope, track, rows });
+                    }
+                }
+                Applied::Removed {
+                    scope,
+                    track,
+                    rows: Err(error),
+                } => {
+                    log::warn!("history: cannot remove a play: {error:#}");
+                    if current && self.scope(cx).as_deref() == Some(scope.as_str()) {
+                        self.put_back(*track);
+                        cx.notify();
+                    }
+                    failed("toast-history-remove-failed", &error, cx);
+                }
+                Applied::Restored(Err(error)) => {
+                    log::warn!("history: cannot restore plays: {error:#}");
+                    failed("toast-history-restore-failed", &error, cx);
+                    self.refresh(cx);
+                }
+                Applied::Wiped(Err(error)) => {
+                    log::warn!("history: cannot clear plays: {error:#}");
+                    failed("toast-history-clear-failed", &error, cx);
+                    self.refresh(cx);
+                }
+                Applied::Restored(Ok(())) | Applied::Wiped(Ok(())) => {}
+            }
+        }
+        if !removed.is_empty() {
+            self.offer_undo(removed, cx);
+        }
+    }
+
+    /// Shows the Removed toast, or keeps the one already up and restarts its clock, so one
+    /// Undo puts back everything removed while it was up.
+    fn offer_undo(&mut self, removed: Vec<Removal>, cx: &mut Context<Self>) {
+        let toasts = Toasts::entity(cx);
+        let up = self
+            .removal_toast
+            .filter(|id| toasts.read(cx).shown().iter().any(|toast| toast.id == *id));
+        if up.is_none() {
+            self.removals.clear();
+        }
+        self.removals.extend(removed);
+
+        let history = cx.entity().downgrade();
+        let toast = Toast::new(Outcome::Plain, "toast-history-removed")
+            .count(self.removals.len())
+            .undo(move |cx| {
+                history.update(cx, |history, cx| history.undo(cx)).ok();
+            });
+        match up {
+            Some(id) => Toasts::settle(id, toast, cx),
+            None => self.removal_toast = Some(Toasts::post(toast, cx)),
+        }
+    }
+
+    /// Puts back every play the Removed toast reports. Plays of an account no longer signed in
+    /// go back into its log without touching the list on screen.
+    fn undo(&mut self, cx: &mut Context<Self>) {
+        self.removal_toast = None;
+        let scope = self.scope(cx);
+        let mut rows = Vec::new();
+        for removal in std::mem::take(&mut self.removals) {
+            if scope.as_deref() == Some(removal.scope.as_str()) {
+                self.put_back(*removal.track);
+            }
+            rows.extend(removal.rows);
+        }
+        cx.notify();
+        if !rows.is_empty() {
+            self.write(Edit::Restore(rows), cx);
+        }
+    }
+
+    /// Puts a play back into the list where its time places it. A play the list already holds
+    /// is left alone, and one put back during a refresh survives it.
+    fn put_back(&mut self, track: Track) {
+        if self
+            .tracks
+            .iter()
+            .any(|held| held.id == track.id && held.added_at == track.added_at)
+        {
+            return;
+        }
+        let at = self
+            .tracks
+            .iter()
+            .position(|held| held.added_at < track.added_at)
+            .unwrap_or(self.tracks.len());
+        if self.task.is_some() {
+            self.pending.push(track.clone());
+        }
+        self.tracks.insert(at, track);
+        self.state = HistoryState::Ready;
+    }
+
+    /// Drops the list and loads it again, so the page shows its skeleton until the plays land.
+    /// A load already under way is left to finish and fills the list in its place.
+    pub fn reload(&mut self, cx: &mut Context<Self>) {
+        self.tracks.clear();
+        self.state = HistoryState::Loading;
+        cx.notify();
+        self.refresh(cx);
+    }
+
+    /// Loads the plays again and keeps the list on screen until they land, which is how the
+    /// history picks up plays from other devices in the background.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         if self.task.is_some() {
             return;
@@ -375,9 +636,19 @@ impl History {
         self.active = None;
         self.tracks.clear();
         self.pending.clear();
+        self.removals.clear();
+        self.era += 1;
+        if let Some(id) = self.removal_toast.take() {
+            Toasts::close(id, cx);
+        }
         self.state = HistoryState::Ready;
         cx.notify();
     }
+}
+
+/// Shows that a change to the history failed, with the error below it.
+fn failed(key: &'static str, error: &anyhow::Error, cx: &mut App) {
+    Toasts::with_detail(Outcome::Failed, key, None, format!("{error:#}"), cx);
 }
 
 fn now() -> i64 {

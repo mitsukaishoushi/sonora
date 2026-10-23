@@ -1,6 +1,6 @@
 use gpui::{Context, EventEmitter};
 
-use crate::Destination;
+use crate::{Destination, SettingsPage};
 
 pub enum NavigationEvent {
     Moved(Destination),
@@ -9,6 +9,8 @@ pub enum NavigationEvent {
 pub struct Navigation {
     trail: Vec<Destination>,
     at: usize,
+    /// The settings destination last on show, which opening settings again returns to.
+    last_settings: Option<Destination>,
 }
 
 impl EventEmitter<NavigationEvent> for Navigation {}
@@ -18,6 +20,7 @@ impl Navigation {
         Self {
             trail: vec![start],
             at: 0,
+            last_settings: None,
         }
     }
 
@@ -67,6 +70,30 @@ impl Navigation {
         self.arrive(cx);
     }
 
+    /// Returns from a drill-in to `parent`. Stepping back keeps the trail free of a parent,
+    /// drill-in, parent loop when the page before shows the parent's settings tab, which also
+    /// puts that tab back where it was scrolled to. Anywhere else the drill-in is replaced so Back
+    /// does not reopen it.
+    pub fn up(&mut self, parent: Destination, cx: &mut Context<Self>) {
+        let tab = |destination: &Destination| destination.settings_page().map(SettingsPage::tab);
+        let before = self.at.checked_sub(1).map(|at| &self.trail[at]);
+        match before.is_some_and(|before| {
+            *before == parent || (tab(before).is_some() && tab(before) == tab(&parent))
+        }) {
+            true => self.back(cx),
+            false => self.replace(parent, cx),
+        }
+    }
+
+    /// Opens settings on the destination last shown there, or on General the first time.
+    pub fn open_settings(&mut self, cx: &mut Context<Self>) {
+        let destination = self
+            .last_settings
+            .clone()
+            .unwrap_or(Destination::Settings(SettingsPage::General));
+        self.go(destination, cx);
+    }
+
     pub fn forward(&mut self, cx: &mut Context<Self>) {
         if !self.can_go_forward() {
             return;
@@ -76,6 +103,9 @@ impl Navigation {
     }
 
     fn arrive(&mut self, cx: &mut Context<Self>) {
+        if self.current().in_settings() {
+            self.last_settings = Some(self.current());
+        }
         cx.emit(NavigationEvent::Moved(self.current()));
         cx.notify();
     }

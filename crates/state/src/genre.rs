@@ -27,7 +27,7 @@ impl Genres {
                 this.error = None;
                 cx.notify();
             }
-            SessionEvent::Reconnected | SessionEvent::LocalChanged => {}
+            SessionEvent::Reconnected | SessionEvent::WentOffline | SessionEvent::LocalChanged => {}
         })
         .detach();
 
@@ -136,7 +136,7 @@ impl GenreDetails {
                 this.clear();
                 cx.notify();
             }
-            SessionEvent::Reconnected | SessionEvent::LocalChanged => {}
+            SessionEvent::Reconnected | SessionEvent::WentOffline | SessionEvent::LocalChanged => {}
         })
         .detach();
 
@@ -190,14 +190,39 @@ impl GenreDetails {
             cx.notify();
             return;
         }
+        self.load(id.to_owned(), false, cx);
+    }
+
+    /// Drops the page and fetches it again from the provider, past the catalog cache, so it
+    /// shows its loading state until the new sections land.
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.id.clone() else {
+            return;
+        };
+        self.clear();
+        self.id = Some(id.clone());
+        self.load(id, true, cx);
+    }
+
+    /// Fetches the genre's sections. A `fresh` load drops the cached genre first, so the
+    /// provider is asked again.
+    fn load(&mut self, id: String, fresh: bool, cx: &mut Context<Self>) {
+        let Some(catalog) = self.session.read(cx).catalog(&id) else {
+            cx.notify();
+            return;
+        };
 
         self.loading = true;
         cx.notify();
 
-        let id = id.to_owned();
         let request = self.io.spawn({
             let id = id.clone();
-            async move { catalog.genre(&id).await }
+            async move {
+                if fresh {
+                    catalog.invalidate_genre(&id).await;
+                }
+                catalog.genre(&id).await
+            }
         });
         self.request = Some(request.abort_handle());
         self.task = Some(cx.spawn(async move |this, cx| {

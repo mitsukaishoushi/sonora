@@ -221,6 +221,18 @@ Root: HKA; Subkey: "Software\Classes\SonoraSpotify"; ValueType: string; ValueNam
 Root: HKA; Subkey: "Software\Classes\SonoraSpotify"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKA; Subkey: "Software\Classes\SonoraSpotify\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
 Root: HKA; Subkey: "Software\Classes\SonoraSpotify\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+; deezer
+Root: HKA; Subkey: "Software\Sonora\Capabilities\UrlAssociations"; ValueType: string; ValueName: "deezer"; ValueData: "SonoraDeezer"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\SonoraDeezer"; ValueType: string; ValueName: ""; ValueData: "Deezer Link"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\SonoraDeezer"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\SonoraDeezer\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
+Root: HKA; Subkey: "Software\Classes\SonoraDeezer\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+; tidal
+Root: HKA; Subkey: "Software\Sonora\Capabilities\UrlAssociations"; ValueType: string; ValueName: "tidal"; ValueData: "SonoraTidal"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\SonoraTidal"; ValueType: string; ValueName: ""; ValueData: "TIDAL Link"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\SonoraTidal"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\SonoraTidal\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
+Root: HKA; Subkey: "Software\Classes\SonoraTidal\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
 
 ; Setup runs elevated, and a [Run] entry inherits that unless it says otherwise: postinstall
 ; entries default to runasoriginaluser, the relaunch after a silent update does not, and an

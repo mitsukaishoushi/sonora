@@ -11,14 +11,15 @@ use ui::{ActiveTheme as _, Filter, FilterChange, FlagAxis, RangeAxis, Unit};
 use crate::shared::menus::{ItemMenu, TrackColumns};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Entity, Hsla, InteractiveElement as _, IntoElement as _, SharedString,
-    Styled as _, WeakEntity,
+    AnyElement, App, Context, Entity, Hsla, InteractiveElement as _, IntoElement as _,
+    ParentElement as _, SharedString, Styled as _, WeakEntity, div,
 };
-use music::{Shape, Track};
+use music::Track;
 use router::Destination;
-use state::{Detail, History, Library, Origin, Playback, Shelf, Sonora};
+use state::{Detail, History, Library, Network, Origin, Playback, Progress, Shelf, Sonora};
 use ui::{
-    Button, Cell, ColumnSpec, Menu, Pending, Pin, ROW_GROUP, Scrollbar, TableSource, TableState,
+    ArrowRing, Button, Cell, ColumnSpec, Menu, Pending, Pin, ROW_GROUP, Scrollbar, TableSource,
+    TableState,
 };
 
 use crate::shared::cells;
@@ -33,6 +34,9 @@ pub(crate) use sort::initial;
 
 use sort::hits;
 
+/// How strongly an unsaved track's heart shows on its row.
+const SETTLED: f32 = 0.5;
+
 /// The current track and its `Playback::control`. A screen keeps the last one and redraws only
 /// when it changes.
 pub(crate) type PlaybackStatus = (Option<String>, Option<bool>);
@@ -46,10 +50,10 @@ pub(crate) trait Tracks: 'static {
     fn tracks<'a>(&self, cx: &'a App) -> &'a [Track];
     fn is_loading(&self, cx: &App) -> bool;
 
-    /// The skeleton rows the table draws before the first tracks arrive. A list that
-    /// leaves the default shows nothing while it loads.
-    fn pending(&self, _cx: &App) -> Option<Pending> {
-        None
+    /// The skeleton rows the table draws before the first tracks arrive. A list that leaves
+    /// the default fills the viewport with them while it loads.
+    fn pending(&self, cx: &App) -> Option<Pending> {
+        self.is_loading(cx).then_some(Pending::Screen)
     }
 }
 
@@ -161,6 +165,8 @@ pub(crate) struct TrackSource {
     playback: Entity<Playback>,
     is_liked: Option<Entity<Library>>,
     starrable: Option<Shelf>,
+    /// The library shelf the rows are, which offline mode keeps to its downloads.
+    library_shelf: Option<Shelf>,
     album: Option<Entity<Detail>>,
     playlist: Option<Entity<Detail>>,
     history: Option<Entity<History>>,
@@ -207,6 +213,7 @@ impl TrackSource {
             playback,
             is_liked: None,
             starrable: None,
+            library_shelf: None,
             album: None,
             playlist: None,
             history: None,
@@ -275,9 +282,21 @@ impl TrackSource {
         self
     }
 
+    /// Marks the rows as a library shelf, which offline mode keeps to what was downloaded.
+    pub(crate) fn shelved(mut self, shelf: Shelf) -> Self {
+        self.library_shelf = Some(shelf);
+        self
+    }
+
+    /// Whether offline mode keeps these rows to their downloads.
+    fn downloads_only(&self, cx: &App) -> bool {
+        self.library_shelf
+            .is_some_and(|shelf| Network::downloads_only(shelf, cx))
+    }
+
     fn catalog(&self, cx: &App) -> bool {
         match (self.starrable, &self.is_liked) {
-            (Some(shelf), Some(library)) => library.read(cx).shape(shelf) == Shape::Catalog,
+            (Some(shelf), Some(library)) => library.read(cx).shape(shelf).is_catalog(),
             _ => false,
         }
     }
@@ -289,7 +308,12 @@ impl TrackSource {
         let Some(id) = self.album.as_ref().and_then(|album| album.read(cx).id()) else {
             return Numbering::Listing;
         };
-        if Sonora::global(cx).library.read(cx).shape(Shelf::of(id)) != Shape::Catalog {
+        if !Sonora::global(cx)
+            .library
+            .read(cx)
+            .shape(Shelf::of(id))
+            .is_catalog()
+        {
             return Numbering::Listing;
         }
 
@@ -359,9 +383,21 @@ impl TrackSource {
         )
     }
 
+    /// Whether a row can start playback now, which a track that has to be streamed cannot while
+    /// the network is gone.
+    fn plays_now(&self, track: &Track, cx: &App) -> bool {
+        track.playable
+            && self
+                .playback
+                .read(cx)
+                .unreachable_reason(track, cx)
+                .is_none()
+    }
+
     fn index_cell(&self, cell: &Cell<TrackField>, track: &Track, cx: &App) -> AnyElement {
         let playing = self.now_playing(cell.row, cx);
-        let (preload, press) = match track.playable {
+        let playable = self.plays_now(track, cx);
+        let (preload, press) = match playable {
             false => (None, None),
             true => {
                 let playback = self.playback.clone();
@@ -391,7 +427,7 @@ impl TrackSource {
 
         let number = self.number(track, cx);
 
-        cells::index(cell, playing, track.playable, number, preload, press, cx)
+        cells::index(cell, playing, playable, number, preload, press, cx)
     }
 
     fn title_cell(
@@ -407,6 +443,7 @@ impl TrackSource {
             color,
             track.explicit,
             None,
+            download_mark(cell, track, cx),
             self.liked_button(cell, track, cx),
         )
     }
@@ -441,7 +478,7 @@ impl TrackSource {
                 })
                 .tint(match saved {
                     true => theme.primary,
-                    false => theme.muted_foreground,
+                    false => theme.muted_foreground.opacity(SETTLED),
                 })
                 .when(!saved, |this| {
                     this.invisible()
@@ -524,6 +561,14 @@ impl TableSource for TrackSource {
             if self.sieve.favorites && !self.starred(track, cx) {
                 return false;
             }
+            if (self.sieve.downloaded || self.downloads_only(cx))
+                && !track
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| state::downloaded(id, cx))
+            {
+                return false;
+            }
             hits(track, query)
         })
     }
@@ -546,9 +591,9 @@ impl TableSource for TrackSource {
         let mut axes: Vec<Filter> = duration.into_iter().collect();
         axes.extend([
             Filter::Flag(FlagAxis {
-                key: "filter-explicit",
-                label: t!("filter-explicit"),
-                on: self.sieve.explicit,
+                key: "filter-hide-explicit",
+                label: t!("filter-hide-explicit"),
+                on: self.sieve.hide_explicit,
             }),
             Filter::Flag(FlagAxis {
                 key: "filter-playable",
@@ -563,6 +608,15 @@ impl TableSource for TrackSource {
                 on: self.sieve.favorites,
             }));
         }
+        // Offline mode already keeps a shelf to its downloads, so the filter would do nothing.
+        let offered = self.sieve.downloaded || !Sonora::global(cx).downloads.read(cx).is_empty();
+        if offered && !self.downloads_only(cx) {
+            axes.push(Filter::Flag(FlagAxis {
+                key: "filter-downloaded",
+                label: t!("filter-downloaded"),
+                on: self.sieve.downloaded,
+            }));
+        }
         axes
     }
 
@@ -572,8 +626,8 @@ impl TableSource for TrackSource {
                 self.sieve.duration = Some(value);
                 true
             }
-            FilterChange::Flag("filter-explicit", value) => {
-                self.sieve.explicit = value;
+            FilterChange::Flag("filter-hide-explicit", value) => {
+                self.sieve.hide_explicit = value;
                 true
             }
             FilterChange::Flag("filter-playable", value) => {
@@ -582,6 +636,10 @@ impl TableSource for TrackSource {
             }
             FilterChange::Flag("filter-favorites", value) => {
                 self.sieve.favorites = value;
+                true
+            }
+            FilterChange::Flag("filter-downloaded", value) => {
+                self.sieve.downloaded = value;
                 true
             }
             FilterChange::Reset => {
@@ -604,6 +662,18 @@ impl TableSource for TrackSource {
         self.provider.is_loading(cx)
     }
 
+    /// Why a track that has to be streamed cannot play while the network is gone, in the words
+    /// of the toast picking it would raise.
+    fn tip(&self, row: usize, cx: &App) -> Option<SharedString> {
+        let track = self.provider.tracks(cx).get(row)?;
+        let reason = self.playback.read(cx).unreachable_reason(track, cx)?;
+        let mut args = i18n::FluentArgs::new();
+        if let Some(provider) = reason.provider() {
+            args.set("name", i18n::Value::value(provider.as_ref()));
+        }
+        Some(i18n::lookup(reason.key(), Some(&args)))
+    }
+
     fn pending(&self, cx: &App) -> Option<Pending> {
         self.provider.pending(cx)
     }
@@ -623,7 +693,7 @@ impl TableSource for TrackSource {
             return self.index_cell(&cell, track, cx);
         }
         let faded = muted.opacity(0.5);
-        let (title, detail) = match track.playable {
+        let (title, detail) = match self.plays_now(track, cx) {
             true => (None, muted),
             false => (Some(faded), faded),
         };
@@ -702,6 +772,35 @@ impl TableSource for TrackSource {
     fn group(&self, field: TrackField, row: usize, cx: &App) -> Option<SharedString> {
         sort::group(self.provider.tracks(cx), field, row)
     }
+}
+
+/// How far a download the listener asked for has got, shown before the heart. The arrow sits on
+/// a filled disc like the explicit badge, the accent ring fades once the download lands, and a
+/// track still waiting its turn or only cached because it played shows nothing.
+fn download_mark(cell: &Cell<TrackField>, track: &Track, cx: &App) -> Option<AnyElement> {
+    let id = track.id.as_deref()?;
+    let downloads = Sonora::global(cx).downloads.read(cx);
+    let theme = cx.theme();
+    let mark = ("download-mark", cell.row);
+    let ring = |done| {
+        ArrowRing::new(mark, done)
+            .color(theme.primary)
+            .arrow(theme.muted_foreground)
+            .backdrop(theme.muted)
+    };
+    let ring = match downloads.track(id)? {
+        Progress::Done => ring(Some(1.)),
+        Progress::Running => ring(downloads.fraction(id)),
+        Progress::Waiting => return None,
+        Progress::Failed => ring(Some(0.)).arrow(theme.danger),
+    };
+    Some(div().flex_none().child(ring).into_any_element())
+}
+
+/// Redraws a track table whenever downloads move, so the marks on its rows keep up.
+pub(crate) fn follow_downloads<T: 'static>(cx: &mut Context<T>) {
+    let downloads = Sonora::global(cx).downloads.clone();
+    cx.observe(&downloads, |_, _, cx| cx.notify()).detach();
 }
 
 #[cfg(test)]

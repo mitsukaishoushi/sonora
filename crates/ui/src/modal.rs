@@ -287,7 +287,7 @@ impl RenderOnce for Modal {
 }
 
 /// The dialog's corner radius for a theme radius: `ROUNDING` times it, capped at what the Rounded
-/// setting gives.
-fn corners(radius: Pixels) -> Pixels {
+/// setting gives. Toasts share it, so both large surfaces round alike.
+pub(crate) fn corners(radius: Pixels) -> Pixels {
     (radius * ROUNDING).min(Rounding::Rounded.radius() * ROUNDING)
 }

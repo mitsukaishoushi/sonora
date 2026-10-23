@@ -10,6 +10,7 @@ use ui::{Pin, PinKind};
 use crate::library::{Library, LibraryEvent, Shelf};
 use crate::session::Session;
 use crate::settings::AppSettings;
+use crate::{Outcome, Target, Toast, Toasts};
 
 /// An automatic order for the pinned list. No sort at all means the order the user dragged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +63,19 @@ pub struct Pins {
     /// The digest of what the shelves last listed, so a library notify that changed nothing
     /// the sidebar shows does not rebuild it.
     seen: u64,
+    /// Pins that left with a playlist taken out of the library, by playlist id, so an Undo
+    /// that brings the playlist back brings its pin back to the same slot.
+    parted: HashMap<String, Parted>,
+    /// The toast reporting the last unpin, and the pin it reports.
+    unpinned: Option<(usize, Pin)>,
+}
+
+/// A pin as it was stored, with its provider and its slot in the dragged order.
+#[derive(Clone)]
+struct Parted {
+    slug: &'static str,
+    pin: Pin,
+    gap: usize,
 }
 
 impl Pins {
@@ -71,17 +85,25 @@ impl Pins {
         session: Entity<Session>,
         cx: &mut Context<Self>,
     ) -> Self {
-        cx.subscribe(&library, |this, _, event, cx| {
-            let LibraryEvent::PlaylistGone(id) = event else {
-                return;
-            };
-            let pin = Pin::new(PinKind::Playlist, id, "");
-            if let Some(slug) = this.session.read(cx).slug_for(id) {
-                this.settings
-                    .update(cx, |settings, cx| settings.unpin(slug, &pin, cx));
+        cx.subscribe(&library, |this, _, event, cx| match event {
+            LibraryEvent::PlaylistGone(id) => {
+                let pin = Pin::new(PinKind::Playlist, id, "");
+                if let Some(slug) = this.session.read(cx).slug_for(id) {
+                    if let Some(parted) = this.part(slug, &pin, cx) {
+                        this.parted.insert(id.clone(), parted);
+                    }
+                    this.settings
+                        .update(cx, |settings, cx| settings.unpin(slug, &pin, cx));
+                }
+                this.mirrored.retain(|_, held| !held.same(&pin));
+                this.changed(cx);
             }
-            this.mirrored.retain(|_, held| !held.same(&pin));
-            this.changed(cx);
+            LibraryEvent::PlaylistBack(id) => {
+                if let Some(parted) = this.parted.remove(id) {
+                    this.restore(parted, cx);
+                }
+            }
+            _ => {}
         })
         .detach();
         cx.observe(&library, |this, _, cx| {
@@ -106,6 +128,8 @@ impl Pins {
             laid: OnceCell::new(),
             rest: OnceCell::new(),
             seen: 0,
+            parted: HashMap::new(),
+            unpinned: None,
         }
     }
 
@@ -277,13 +301,59 @@ impl Pins {
         self.changed(cx);
     }
 
+    /// Unpins and reports it in a toast whose Undo pins it back into the same slot.
     pub fn unpin(&mut self, pin: Pin, cx: &mut Context<Self>) {
         let Some(slug) = self.session.read(cx).slug_for(&pin.id) else {
             return;
         };
+        let parted = self.part(slug, &pin, cx);
         self.settings
             .update(cx, |settings, cx| settings.unpin(slug, &pin, cx));
         self.tell(&pin, false, cx);
+        self.changed(cx);
+
+        let Some(parted) = parted else {
+            return;
+        };
+        let pins = cx.weak_entity();
+        let back = parted.clone();
+        let toast = Toast::new(Outcome::Done, "toast-unpinned")
+            .name(parted.pin.title.clone())
+            .target(target(&parted.pin))
+            .undo(move |cx| {
+                pins.update(cx, |this, cx| this.restore(back.clone(), cx))
+                    .ok();
+            });
+        self.unpinned = Some((Toasts::post(toast, cx), parted.pin));
+    }
+
+    /// The stored pin matching `pin` with the slot it holds, or `None` when it is not pinned.
+    fn part(&self, slug: &'static str, pin: &Pin, cx: &App) -> Option<Parted> {
+        let dragged = self.dragged(cx);
+        let gap = dragged.iter().position(|held| held.same(pin))?;
+        Some(Parted {
+            slug,
+            pin: dragged[gap].clone(),
+            gap,
+        })
+    }
+
+    /// Pins a parted pin back into its slot, as an Undo does. Nothing happens when it is pinned
+    /// already or its provider is no longer the live one.
+    fn restore(&mut self, parted: Parted, cx: &mut Context<Self>) {
+        let Parted { slug, pin, gap } = parted;
+        if self.holds(&pin, cx) {
+            return;
+        }
+        let session = self.session.read(cx);
+        let slugs = session.active_slugs();
+        if session.slug_for(&pin.id) != Some(slug) || !slugs.contains(&slug) {
+            return;
+        }
+        self.settings.update(cx, |settings, cx| {
+            settings.pin(slug, pin.clone(), Some(gap), &slugs, cx)
+        });
+        self.tell(&pin, true, cx);
         self.changed(cx);
     }
 
@@ -325,11 +395,18 @@ impl Pins {
         self.forget();
     }
 
-    /// Puts the local list back after the provider refused the change.
+    /// Puts the local list back after the provider refused the change, and takes down the
+    /// toast that reported an unpin the provider turned away.
     fn revert(&mut self, pin: Pin, attempted: bool, cx: &mut Context<Self>) {
         let Some(slug) = self.session.read(cx).slug_for(&pin.id) else {
             return;
         };
+        if !attempted && let Some((toast, unpinned)) = self.unpinned.take() {
+            match unpinned.same(&pin) {
+                true => Toasts::close(toast, cx),
+                false => self.unpinned = Some((toast, unpinned)),
+            }
+        }
         let slugs = self.session.read(cx).active_slugs();
         self.settings.update(cx, |settings, cx| match attempted {
             true => settings.unpin(slug, &pin, cx),
@@ -412,6 +489,17 @@ impl Pins {
         });
         self.changed(cx);
     }
+}
+
+/// The page a pin's toast links its name to.
+fn target(pin: &Pin) -> Option<Target> {
+    let id = pin.id.clone().into();
+    Some(match pin.kind {
+        PinKind::Playlist => Target::Playlist(id),
+        PinKind::Album => Target::Album(id),
+        PinKind::Artist => Target::Artist(id),
+        PinKind::Song => Target::Song(id),
+    })
 }
 
 fn rank(kind: PinKind) -> u8 {

@@ -41,7 +41,9 @@ pub struct Lyrics {
     unsaved: Vec<Unsaved>,
     providers: Vec<Arc<dyn LyricsProvider>>,
     enabled_providers: Vec<String>,
-    prefer_local: bool,
+    /// The order of the sources the answer on show was ranked by. A new order looks the track
+    /// up again, from what is held, so the source now ranked first is the one shown.
+    priority: Vec<String>,
     playback: Entity<Playback>,
     queue: Entity<Queue>,
     session: Entity<Session>,
@@ -71,12 +73,12 @@ impl Lyrics {
         cx.observe(&settings, |this, settings, cx| {
             let settings = settings.read(cx);
             let enabled = settings.lyrics_providers();
-            let prefer_local = settings.prefer_local_lyrics();
-            if enabled == this.enabled_providers && prefer_local == this.prefer_local {
+            let priority = settings.lyrics_provider_priority();
+            if enabled == this.enabled_providers && priority == this.priority {
                 return;
             }
             this.enabled_providers = enabled.to_vec();
-            this.prefer_local = prefer_local;
+            this.priority = priority;
             this.task = None;
             this.ahead = None;
             this.ahead_of = None;
@@ -84,13 +86,8 @@ impl Lyrics {
             this.follow(cx);
         })
         .detach();
-        let (enabled_providers, prefer_local) = {
-            let settings = settings.read(cx);
-            (
-                settings.lyrics_providers().to_vec(),
-                settings.prefer_local_lyrics(),
-            )
-        };
+        let enabled_providers = settings.read(cx).lyrics_providers().to_vec();
+        let priority = settings.read(cx).lyrics_provider_priority();
         let store = Sheets::new(storage::Cache::standard());
         let moving = store.clone();
         let migration = cx
@@ -109,7 +106,7 @@ impl Lyrics {
             unsaved: Vec::new(),
             providers,
             enabled_providers,
-            prefer_local,
+            priority,
             playback,
             queue,
             session,
@@ -157,11 +154,16 @@ impl Lyrics {
         let music::Lyrics::Synced { lines } = &self.current()?.lyrics else {
             return None;
         };
-        music::lyrics::active(lines, self.playback.read(cx).position())
+        let playback = self.playback.read(cx);
+        let position = playback
+            .steered(cx)
+            .map_or_else(|| playback.position(), |steered| steered.position);
+        music::lyrics::active(lines, position)
     }
 
     fn follow(&mut self, cx: &mut Context<Self>) {
-        let Some(track) = self.playback.read(cx).track() else {
+        let shown = self.playback.read(cx).shown_track(cx);
+        let Some(track) = shown.as_ref() else {
             return self.forget(cx);
         };
         let Some(id) = track.id.as_deref() else {
@@ -201,10 +203,11 @@ impl Lyrics {
             .filter(|hit| settings.lyrics_provider_enabled(hit.source))
             .cloned()
             .collect();
+        let priority = settings.lyrics_provider_priority();
         let instrumental = music::lyrics::instrumental(query, &hits);
         self.task = None;
         self.settled = true;
-        self.hits = ordered(query, hits);
+        self.hits = ordered(query, hits, &priority);
         self.state = state_for(&self.hits, instrumental);
         cx.notify();
         self.prefetch(cx);
@@ -353,14 +356,18 @@ impl Lyrics {
     /// are read again on every play. What the cache holds is shown alongside the new answers.
     fn fetch(&mut self, id: String, track: Track, cx: &mut Context<Self>) -> Task<()> {
         let settings = self.settings.read(cx);
-        let prefer_local = settings.prefer_local_lyrics();
+        let priority = settings.lyrics_provider_priority();
         let enabled: Vec<&'static str> = self
             .providers
             .iter()
             .map(|provider| provider.name())
             .filter(|name| settings.lyrics_provider_enabled(name))
             .collect();
-        let asked = self.asked(&id, cx);
+        let mut asked = self.asked(&id, cx);
+        // Offline mode reads a file's own lyrics and what the cache kept, and asks no service.
+        if crate::Network::offline(cx) {
+            asked.retain(|provider| provider.name() == LOCAL);
+        }
         let remembered = self.recall(&id);
         let stored = remembered.is_none().then(|| self.stored(&id, cx));
         let query = self.query(&track, &id, cx);
@@ -376,7 +383,7 @@ impl Lyrics {
                 this.update(cx, |this, _| this.hold(id, held)).ok();
             }
             let cached = cached.unwrap_or_default();
-            let mut providers: Vec<Arc<dyn LyricsProvider>> = asked
+            let providers: Vec<Arc<dyn LyricsProvider>> = asked
                 .into_iter()
                 .filter(|provider| !cached.covers(provider))
                 .collect();
@@ -391,36 +398,6 @@ impl Lyrics {
                 return;
             }
 
-            if prefer_local
-                && let Some(index) = providers
-                    .iter()
-                    .position(|provider| provider.name() == LOCAL)
-            {
-                let local = providers.remove(index);
-                let asked = query.clone();
-                let read = io.spawn(async move { local.search(&asked).await });
-                let hits = join(read).await.unwrap_or_else(|error| {
-                    log::warn!(
-                        "lyrics: cannot read the lyrics in {}: {error:#}",
-                        track.name
-                    );
-                    Vec::new()
-                });
-                if hits.iter().any(|hit| music::lyrics::eligible(&query, hit)) {
-                    let found = Found {
-                        hits,
-                        answered: Vec::new(),
-                    };
-                    this.update(cx, |this, cx| {
-                        if this.finished(&id) {
-                            this.show(&found, &query, cx);
-                        }
-                    })
-                    .ok();
-                    return;
-                }
-            }
-
             // The cached hits from enabled sources go in first, as if they had just arrived.
             let held: Vec<LyricsHit> = cached
                 .hits
@@ -430,17 +407,20 @@ impl Lyrics {
                 .collect();
             let (sender, mut incoming) = tokio::sync::mpsc::unbounded_channel();
             if !held.is_empty() {
-                sender.send(held).ok();
+                sender.send((None, held)).ok();
             }
+            let mut pending: Vec<&'static str> =
+                providers.iter().map(|provider| provider.name()).collect();
             let ranking = query.clone();
             let worker = io.spawn(async move { gather(providers, query, sender).await });
             let mut hits = Vec::new();
             let mut displayed: Option<LyricsHit> = None;
             let mut shown: Option<u8> = None;
 
-            while let Some(mut found) = incoming.recv().await {
+            while let Some((from, mut found)) = incoming.recv().await {
+                pending.retain(|name| Some(*name) != from);
                 hits.append(&mut found);
-                let ranked = ordered(&ranking, hits.clone());
+                let ranked = ordered(&ranking, hits.clone(), &priority);
                 let Some(best) = ranked.first().cloned() else {
                     continue;
                 };
@@ -449,12 +429,16 @@ impl Lyrics {
                     shown = Some(step);
                     displayed = Some(best);
                 }
+                let waiting = displayed.as_ref().is_some_and(|displayed| {
+                    let place = rank_in(&priority, displayed.source);
+                    pending.iter().any(|name| rank_in(&priority, name) < place)
+                });
                 let anchor = displayed.clone();
                 this.update(cx, |this, cx| {
                     if this.following.as_deref() != Some(id.as_str()) {
                         return;
                     }
-                    this.paint(ranked, anchor.as_ref(), cx);
+                    this.paint(ranked, anchor.as_ref(), waiting, cx);
                 })
                 .ok();
             }
@@ -469,7 +453,7 @@ impl Lyrics {
                         this.keep(id, cached, &hits, answered, cx);
                         if current {
                             let instrumental = music::lyrics::instrumental(&ranking, &hits);
-                            let ranked = ordered(&ranking, hits);
+                            let ranked = ordered(&ranking, hits, &priority);
                             this.settle(ranked, displayed.as_ref(), instrumental, cx);
                         }
                     }
@@ -489,16 +473,16 @@ impl Lyrics {
 
     /// Shows an answer that arrived while others are still being looked for.
     ///
-    /// A word-by-word sheet is the best there is, so it goes up the moment it
-    /// turns up and settles the question rather than waiting for the slowest
-    /// source to answer. Short of that, the first timed answer is put up and
-    /// nothing replaces it until the search is over: the reader is never walked
-    /// through a series of ever better sheets, and an untimed one is not shown at
-    /// all while something better could still arrive.
+    /// A word-by-word sheet goes up the moment it turns up. It settles the question unless
+    /// `waiting` says a source the user prefers has not answered yet, which may still replace
+    /// it with a word-by-word sheet of its own. Short of that, the first timed answer is put up
+    /// and nothing replaces it until the search is over, and an untimed one is not shown at all
+    /// while something better could still arrive.
     fn paint(
         &mut self,
         ranked: Vec<LyricsHit>,
         displayed: Option<&LyricsHit>,
+        waiting: bool,
         cx: &mut Context<Self>,
     ) {
         if self.settled {
@@ -507,19 +491,21 @@ impl Lyrics {
         let kind = self
             .prospect(&ranked, displayed)
             .map(|hit| depth(&hit.lyrics));
-        let best = kind == Some(WORDED);
-        if !best && !self.hits.is_empty() {
+        let worded = kind == Some(WORDED);
+        if !worded && (!self.hits.is_empty() || kind != Some(TIMED)) {
             return;
         }
-        if !best && kind != Some(TIMED) {
-            return;
-        }
-        match best {
-            true => {
+        match (worded, waiting) {
+            (true, false) => {
                 log::debug!("lyrics: settling on a word-by-word answer as it arrives");
                 self.settled = true;
             }
-            false => log::debug!("lyrics: showing the first timed answer while the rest arrive"),
+            (true, true) => {
+                log::debug!("lyrics: showing a word-by-word answer while preferred sources look")
+            }
+            (false, _) => {
+                log::debug!("lyrics: showing the first timed answer while the rest arrive")
+            }
         }
         self.apply(ranked, displayed, cx);
     }
@@ -672,10 +658,22 @@ fn same(left: &LyricsHit, right: &LyricsHit) -> bool {
         && left.lyrics.worded() == right.lyrics.worded()
 }
 
-fn ordered(query: &LyricsQuery, hits: Vec<LyricsHit>) -> Vec<LyricsHit> {
-    let mut ranked = music::lyrics::rank(query, hits);
+fn ordered(query: &LyricsQuery, hits: Vec<LyricsHit>, priority: &[String]) -> Vec<LyricsHit> {
+    let mut ranked = music::lyrics::rank_with_priority(query, hits, priority);
     music::lyrics::reshape(&mut ranked);
     ranked
+}
+
+/// Hits sent to a lookup, with the provider that has now answered. Hits held from an earlier
+/// lookup come with no provider.
+type Reply = (Option<&'static str>, Vec<LyricsHit>);
+
+/// Where `source` stands in the user's priority. Sources missing from it come last.
+fn rank_in(priority: &[String], source: &str) -> usize {
+    priority
+        .iter()
+        .position(|name| name == source)
+        .unwrap_or(priority.len())
 }
 
 /// What the services have said about one track: every hit matched to it, unranked and from every
@@ -712,26 +710,31 @@ fn query_for(track: &Track, key: Option<TrackKey>) -> LyricsQuery {
     }
 }
 
-/// Asks every provider at once and sends each one's hits for the queried track as they arrive.
-/// Returns the providers that replied, leaving out any that failed.
+/// Asks every provider at once and sends each one's name and hits for the queried track as
+/// they arrive. A provider that fails sends its name with no hits, so the receiver knows it is
+/// done. Returns the providers that replied, leaving out any that failed.
 async fn gather(
     providers: Vec<Arc<dyn LyricsProvider>>,
     query: LyricsQuery,
-    sender: tokio::sync::mpsc::UnboundedSender<Vec<LyricsHit>>,
+    sender: tokio::sync::mpsc::UnboundedSender<Reply>,
 ) -> anyhow::Result<Vec<&'static str>> {
     let mut tasks = JoinSet::new();
     for provider in providers {
         let query = query.clone();
         tasks.spawn(async move {
             let name = provider.name();
-            let mut found = provider
+            let found = provider
                 .search(&query)
                 .await
                 .inspect_err(|error| log::warn!("lyrics: {name} did not answer: {error:#}"))
-                .ok()?;
-            // Hits for another track are dropped here, before the lookup holds and copies them.
-            found.retain(|hit| music::lyrics::matched(&query, hit));
-            Some((name, found))
+                .ok()
+                .map(|mut found| {
+                    // Hits for another track are dropped here, before the lookup holds and
+                    // copies them.
+                    found.retain(|hit| music::lyrics::matched(&query, hit));
+                    found
+                });
+            (name, found)
         });
     }
     let mut answered = Vec::new();
@@ -741,9 +744,11 @@ async fn gather(
             // stop its network requests. Dropping this JoinSet aborts the remaining tasks.
             _ = sender.closed() => break,
             found = tasks.join_next() => {
-                if let Some(Ok(Some((name, found)))) = found {
-                    answered.push(name);
-                    sender.send(found).ok();
+                if let Some(Ok((name, found))) = found {
+                    if found.is_some() {
+                        answered.push(name);
+                    }
+                    sender.send((Some(name), found.unwrap_or_default())).ok();
                 }
             }
         }

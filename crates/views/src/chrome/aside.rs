@@ -12,16 +12,17 @@ use gpui::{
     div, ease_in_out, px, relative, size, svg, uniform_list,
 };
 use i18n::t;
-use music::{Shape, Track, Voice};
+use music::{Contributor, Shape, Track, Voice};
 use router::{Destination, LibraryTab, Link as _};
 use state::{
     AppSettings, Lyrics, LyricsState, Network, Playback, PlaybackState, Queue, RomanizationScripts,
-    Shelf, SideTab, Sonora, Whence,
+    Shelf, SideTab, Sonora, Steered, Whence,
 };
 use ui::{
-    ActiveTheme as _, Button, Card, DraggedPin, Edge, Motion, Motioned as _, Pin, Pinnable as _,
-    Popup, Scrollbar, Scroller, Spot, Springs, Text, Vacancy, drop_gap, drop_marker,
-    ease_out_cubic, ease_out_expo, eyebrow, faint, mix, snapped, vacant,
+    ActiveTheme as _, Avatar, Button, Card, DraggedPin, Edge, Initials, Motion, Motioned as _,
+    PREFETCH_REACH, Pin, Pinnable as _, Popup, Scrollbar, Scroller, Spot, Springs, Text, Vacancy,
+    drop_gap, drop_marker, ease_out_cubic, ease_out_expo, eyebrow, faint, mix, prefetch, snapped,
+    vacant,
 };
 
 use crate::chrome::{Chrome, section_label};
@@ -30,10 +31,13 @@ use crate::shared::menus::ItemMenu;
 use crate::shared::pins::Pinned as _;
 
 const QUEUE: &str = "queue";
+/// How many text heights across the picture of whoever queued a song is.
+const ADDER_FACE: f32 = 1.4;
 const BULLET: SharedString = SharedString::new_static("·");
 const FADE: f32 = 96.;
 const REST: f32 = FADE * 0.75;
-const TAIL_ROWS: usize = 2;
+/// Blank rows after the last queued song, on top of the ones that clear the player bar.
+const TAIL_ROWS: usize = 1;
 const BLUR: f32 = 0.13;
 const BACKGROUND_SINGING_BLUR: Pixels = px(0.75);
 const VEIL: f32 = 0.3;
@@ -65,6 +69,9 @@ const LAG_LEAST: Pixels = px(0.05);
 const LAG_STALL: f32 = 0.064;
 // Below this a blur is not worth a layer of its own.
 const HAZE_LEAST: Pixels = px(0.05);
+/// The step a row's blur is rounded to. Neighbouring rows that land on the same step share one
+/// offscreen layer in the renderer, where each distinct blur costs a layer of its own.
+const HAZE_STEP: Pixels = px(0.25);
 // How far a verse sinks while it is held.
 const PRESSED: f32 = 0.955;
 // The widest a line of lyrics is set, in multiples of its own size. Left to fill
@@ -94,6 +101,63 @@ fn track(queue: &Queue, position: QueuePosition) -> Option<Track> {
         QueuePosition::Current => queue.current().cloned(),
         QueuePosition::Upcoming(index) => queue.upcoming().nth(index).cloned(),
         QueuePosition::Similar(index) => queue.similar().nth(index).cloned(),
+    }
+}
+
+/// Where the queue list reads its songs: this app's own queue, or the queue of the device that has
+/// playback. That one is shown read only, with the songs people queued by hand first.
+#[derive(Clone)]
+enum Listing {
+    Own(Entity<Queue>),
+    Steered {
+        current: Option<Rc<Track>>,
+        upcoming: Rc<[Track]>,
+        playing: bool,
+    },
+}
+
+impl Listing {
+    /// The steered device's queue and the row counts it lays out as.
+    fn steered(steered: &Steered) -> (Self, Sections) {
+        let (queued, following) = steered
+            .upcoming
+            .iter()
+            .partition::<Vec<_>, _>(|upcoming| upcoming.queued);
+        let sections = Sections {
+            past: 0,
+            current: steered.track.is_some(),
+            manual: queued.len(),
+            upcoming: steered.upcoming.len(),
+            similar: 0,
+        };
+        let upcoming = queued
+            .into_iter()
+            .chain(following)
+            .map(|upcoming| upcoming.track.clone())
+            .collect();
+        let listing = Self::Steered {
+            current: steered.track.clone().map(Rc::new),
+            upcoming,
+            playing: steered.playing,
+        };
+        (listing, sections)
+    }
+
+    fn track(&self, position: QueuePosition, cx: &App) -> Option<Track> {
+        match self {
+            Self::Own(queue) => track(queue.read(cx), position),
+            Self::Steered {
+                current, upcoming, ..
+            } => match position {
+                QueuePosition::Current => current.as_deref().cloned(),
+                QueuePosition::Upcoming(index) => upcoming.get(index).cloned(),
+                QueuePosition::Past(_) | QueuePosition::Similar(_) => None,
+            },
+        }
+    }
+
+    fn remote(&self) -> bool {
+        matches!(self, Self::Steered { .. })
     }
 }
 
@@ -225,10 +289,28 @@ struct Sung {
     from: gpui::Point<f32>,
 }
 
+/// How one verse is drawn outside the sheet, for a still picture of the lyrics such as the
+/// settings preview. The sizes are the sheet's own, before an active verse grows.
+#[derive(Clone, Copy)]
+pub(crate) struct VerseLook {
+    pub(crate) active: bool,
+    /// The verse's text size and its romanized lane's.
+    pub(crate) size: Pixels,
+    pub(crate) lane: Pixels,
+    pub(crate) karaoke: bool,
+    pub(crate) scripts: Option<RomanizationScripts>,
+    /// How far out of focus the verse sits, from 0 for sharp to 1 at the sheet's edge.
+    pub(crate) haze: f32,
+}
+
 #[derive(Clone, Copy)]
 struct RowLook {
     playing: bool,
     drop_line: Option<Edge>,
+    /// Whether the row is a song someone queued by hand, which names who did when it is known.
+    queued: bool,
+    /// Whether the row is on another device's queue, which this app shows but cannot change.
+    remote: bool,
 }
 
 /// The credit under a sheet, resolved once for the answer it names and the language it was read
@@ -305,6 +387,9 @@ pub(crate) struct Aside {
     scroll: UniformListScrollHandle,
     scrollbar: Entity<Scrollbar>,
     past_len: usize,
+    /// The id of the steered device's track the list was last pinned for, or `None` over this
+    /// app's own queue. A change pins the now-playing row again.
+    remote_track: Option<Option<String>>,
     anchor: bool,
     titled: bool,
     aiming: bool,
@@ -408,6 +493,7 @@ impl Aside {
             scroll,
             scrollbar,
             past_len: 0,
+            remote_track: None,
             anchor: true,
             titled: true,
             aiming: false,
@@ -746,11 +832,17 @@ impl Aside {
         look: RowLook,
         cx: &Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
-        let RowLook { playing, drop_line } = look;
+        let RowLook {
+            playing,
+            drop_line,
+            queued,
+            remote,
+        } = look;
         let theme = *cx.theme();
-        let past_index = position.past();
-        let queue_index = position.upcoming();
-        let similar_index = position.similar();
+        let past_index = position.past().filter(|_| !remote);
+        let queue_index = position.upcoming().filter(|_| !remote);
+        let similar_index = position.similar().filter(|_| !remote);
+        let current = position == QueuePosition::Current;
         let title = match position {
             QueuePosition::Past(_) => theme.muted_foreground,
             QueuePosition::Current => theme.primary,
@@ -765,30 +857,45 @@ impl Aside {
         )
         .cover(track.cover.clone())
         .bare_meta(
-            crate::shared::cells::artist_links(
-                SharedString::from(format!("queue-track-artist-{index}")),
-                track.artist_refs.clone(),
-                track.artists.clone(),
-                theme.muted_foreground,
-            )
-            .text_size(theme.text(Text::Small))
-            .truncate(),
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .min_w_0()
+                .child(
+                    crate::shared::cells::artist_links(
+                        SharedString::from(format!("queue-track-artist-{index}")),
+                        track.artist_refs.clone(),
+                        track.artists.clone(),
+                        theme.muted_foreground,
+                    )
+                    .text_size(theme.text(Text::Small))
+                    .truncate(),
+                )
+                .when_some(
+                    track.added_by.as_deref().filter(|_| queued),
+                    |this, added| this.child(adder(added, theme)),
+                ),
         )
         .tint(title)
         .when(track.explicit, Card::explicit)
-        .play(
-            playing,
-            cx.listener(move |this, _, _, cx| {
-                let stale = this.queue.read(cx).revision() != queue_revision;
-                this.playback.update(cx, |playback, cx| match position {
-                    QueuePosition::Current => playback.toggle_play(cx),
-                    QueuePosition::Past(index) if !stale => playback.play_past(index, cx),
-                    QueuePosition::Upcoming(index) if !stale => playback.play_upcoming(index, cx),
-                    QueuePosition::Similar(index) if !stale => playback.play_similar(index, cx),
-                    _ => {}
-                });
-            }),
-        )
+        .when(!remote || current, |card| {
+            card.play(
+                playing,
+                cx.listener(move |this, _, _, cx| {
+                    let stale = this.queue.read(cx).revision() != queue_revision;
+                    this.playback.update(cx, |playback, cx| match position {
+                        QueuePosition::Current => playback.toggle_play(cx),
+                        QueuePosition::Past(index) if !stale => playback.play_past(index, cx),
+                        QueuePosition::Upcoming(index) if !stale => {
+                            playback.play_upcoming(index, cx)
+                        }
+                        QueuePosition::Similar(index) if !stale => playback.play_similar(index, cx),
+                        _ => {}
+                    });
+                }),
+            )
+        })
         .menu(cx.listener(move |this, event: &MouseDownEvent, _, cx| {
             this.track_menu.reset(cx);
             this.context_menu = Some(ContextMenuState {
@@ -896,9 +1003,12 @@ impl Aside {
         )
     }
 
+    /// The panel's title and, over this app's own queue, the controls that change it. They go
+    /// while another device has playback, since its queue is shown read only.
     fn header(
         &self,
         sections: Sections,
+        remote: bool,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -924,7 +1034,7 @@ impl Aside {
             .when(!self.titled, |this| {
                 this.justify_end().pr(theme.metrics.control + px(8.))
             })
-            .when(self.tab == SideTab::Queue, |this| {
+            .when(self.tab == SideTab::Queue && !remote, |this| {
                 this.child(
                     div()
                         .flex()
@@ -984,17 +1094,20 @@ impl Aside {
         }
 
         Some(
-            self.raised(ui::perched(
-                Button::new("resume-pin")
-                    .secondary()
-                    .icon("icons/undo-2.svg")
-                    .tooltip("lyrics-follow")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.anchor_verse();
-                        cx.notify();
-                    })),
+            self.raised(
+                ui::perched(
+                    Button::new("resume-pin")
+                        .secondary()
+                        .icon("icons/undo-2.svg")
+                        .tooltip("lyrics-follow")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.anchor_verse();
+                            cx.notify();
+                        })),
+                    cx,
+                ),
                 cx,
-            )),
+            ),
         )
     }
 
@@ -1011,21 +1124,39 @@ impl Aside {
         };
         let perch = ui::return_to("queue-return-top", &self.scrollbar, goal, tooltip, cx)?;
 
-        Some(self.raised(perch))
+        Some(self.raised(perch, cx))
     }
 
-    /// Lifts a floating control clear of the transport a stripped aside leaves underneath it.
-    fn raised(&self, perch: Div) -> Div {
+    /// Keeps floating controls above the workspace player bar and the strip over it, or above
+    /// the fullscreen transport.
+    fn raised(&self, perch: Div, cx: &App) -> Div {
         match self.titled {
-            true => perch,
+            true => match self.bottom(cx) > Pixels::ZERO {
+                true => perch.bottom(self.bottom(cx) + cx.theme().metrics.pad * 1.5),
+                false => perch,
+            },
             false => perch.bottom_16(),
+        }
+    }
+
+    /// Only workspace asides sit behind the player bar; fullscreen keeps its own clearance.
+    fn bottom(&self, cx: &App) -> Pixels {
+        match self.titled {
+            true => Chrome::bottom(cx),
+            false => Pixels::ZERO,
         }
     }
 
     fn verses(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
-        let position = self.playback.read(cx).live_position();
-        let singing = matches!(self.playback.read(cx).state(), PlaybackState::Playing);
+        let playback = self.playback.read(cx);
+        let (position, singing) = match playback.steered(cx) {
+            Some(steered) => (steered.position, steered.playing),
+            None => (
+                playback.live_position(),
+                matches!(playback.state(), PlaybackState::Playing),
+            ),
+        };
         let lyrics = self.lyrics.read(cx);
         let state = lyrics.state().clone();
         let shown = lyrics.current().is_some();
@@ -1069,7 +1200,7 @@ impl Aside {
                     * lyrics_frame_scale(window.viewport_size())
             }
         };
-        let lane_size = theme.text(Text::Body) * scale;
+        let (verse, lane_size) = verse_sizes(self.titled, scale, &theme);
         let sung = Sung {
             karaoke: karaoke_effects,
             lane: lane_size,
@@ -1118,10 +1249,6 @@ impl Aside {
             self.pin_verse(focus, window, cx);
         }
 
-        let verse = match self.titled {
-            true => theme.text(Text::Large),
-            false => theme.text(Text::Title) + FULLSCREEN_VERSE_GROWTH,
-        } * scale;
         let reach = verse * REACH;
         let wrap_size = active_verse_size(verse);
         let scroll = self.verse_bar.read(cx).scroll().clone();
@@ -1277,7 +1404,7 @@ impl Aside {
                             this.seek_verse(notes_row, instrumental_start, cx);
                         }))
                         .when(softness > 0., |this| this.opacity(1. - VEIL * softness))
-                        .map(|this| match blur * softness {
+                        .map(|this| match stepped(blur * softness) {
                             soft if soft > HAZE_LEAST => this.blur(soft),
                             _ => this,
                         });
@@ -1500,7 +1627,7 @@ impl Aside {
 
                     let verse_line = verse_line
                         .when(softness > 0., |this| this.opacity(1. - VEIL * softness))
-                        .map(|this| match row_blur * softness {
+                        .map(|this| match stepped(row_blur * softness) {
                             soft if soft > HAZE_LEAST => this.blur(soft),
                             _ => this,
                         });
@@ -1592,6 +1719,7 @@ impl Aside {
         };
 
         let sheet = Scroller::new("lyrics", &self.verse_bar)
+            .bottom_inset(self.bottom(cx))
             .when(lines.is_some(), Scroller::manual_presentation)
             .when(lines.is_some(), |this| {
                 this.capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, _, cx| {
@@ -1803,7 +1931,7 @@ impl Aside {
         let name = match origin.whence {
             Whence::Saved => match Sonora::global(cx).library.read(cx).shape(Shelf::Streaming) {
                 Shape::Saved => t!("library-liked-songs"),
-                Shape::Catalog => t!("nav-songs"),
+                Shape::Catalog(_) => t!("nav-songs"),
             },
             Whence::Local => t!("nav-local"),
             Whence::Radio => t!("queue-from-radio", name = origin.name.as_deref()?),
@@ -1813,34 +1941,60 @@ impl Aside {
         Some((name, place))
     }
 
-    fn rows(&self, sections: Sections, cx: &mut Context<Self>) -> gpui::UniformList {
+    fn rows(
+        &self,
+        listing: Listing,
+        sections: Sections,
+        cx: &mut Context<Self>,
+    ) -> gpui::UniformList {
         let queue = self.queue.clone();
-        let from = self.playing_from(cx);
+        let remote = listing.remote();
+        let from = match remote {
+            true => None,
+            false => self.playing_from(cx),
+        };
         let drop_gap = self.drop_gap;
         let upcoming = sections.upcoming;
-        let audible = matches!(self.playback.read(cx).state(), PlaybackState::Playing);
+        let manual = sections.manual;
+        let audible = match &listing {
+            Listing::Own(_) => matches!(self.playback.read(cx).state(), PlaybackState::Playing),
+            Listing::Steered { playing, .. } => *playing,
+        };
+        // A uniform list only draws rows inside its padding, so the space under a see-through
+        // player bar is made of blank rows, which keeps the songs scrolling under it drawn.
+        let under = (self.bottom(cx) / cx.theme().metrics.list_row).ceil() as usize;
 
         uniform_list(
             "queue-rows",
-            sections.len() + TAIL_ROWS,
-            cx.processor(move |_, range: Range<usize>, _window, cx| {
-                let (revision, slots) = {
-                    let queue = queue.read(cx);
+            sections.len() + under + TAIL_ROWS,
+            cx.processor(move |_, range: Range<usize>, window, cx| {
+                let reach = (range.len() as f32 * PREFETCH_REACH).ceil() as usize;
+                let near = (range.start.saturating_sub(reach)..range.start)
+                    .chain(range.end..(range.end + reach).min(sections.len()));
+                let (revision, slots, ahead) = {
+                    let ahead = near
+                        .filter_map(|index| match sections.slot(index) {
+                            Slot::Track(position) => listing
+                                .track(position, cx)
+                                .map(|found| (index, position, found)),
+                            Slot::Header(_) => None,
+                        })
+                        .collect::<Vec<_>>();
                     let slots = range
                         .clone()
                         .map(|index| {
                             let slot = (index < sections.len()).then(|| sections.slot(index));
                             let found = match slot {
-                                Some(Slot::Track(position)) => track(queue, position),
+                                Some(Slot::Track(position)) => listing.track(position, cx),
                                 Some(Slot::Header(_)) | None => None,
                             };
                             (index, slot, found)
                         })
                         .collect::<Vec<_>>();
-                    (queue.revision(), slots)
+                    (queue.read(cx).revision(), slots, ahead)
                 };
 
-                slots
+                let rows = slots
                     .into_iter()
                     .map(|(index, slot, found)| match (slot, found) {
                         (None, _) => div().into_any_element(),
@@ -1876,12 +2030,30 @@ impl Aside {
                                 _ => None,
                             };
                             let playing = audible && position == QueuePosition::Current;
-                            let look = RowLook { playing, drop_line };
+                            let queued =
+                                matches!(position, QueuePosition::Upcoming(at) if at < manual);
+                            let look = RowLook {
+                                playing,
+                                drop_line,
+                                queued,
+                                remote,
+                            };
                             Self::row(found, index, position, revision, look, cx).into_any_element()
                         }
                         (Some(Slot::Track(_)), None) => div().into_any_element(),
                     })
-                    .collect()
+                    .collect::<Vec<_>>();
+                for (index, position, found) in ahead {
+                    let look = RowLook {
+                        playing: false,
+                        drop_line: None,
+                        queued: matches!(position, QueuePosition::Upcoming(at) if at < manual),
+                        remote,
+                    };
+                    let row = Self::row(found, index, position, revision, look, cx);
+                    prefetch(row.into_any_element(), window, cx);
+                }
+                rows
             }),
         )
     }
@@ -1890,14 +2062,22 @@ impl Aside {
 impl Render for Aside {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.scrollbar.read(cx).sync();
-        let queue = self.queue.read(cx);
-        let sections = Sections {
-            past: queue.past().len(),
-            current: queue.current().is_some(),
-            manual: queue.manual().len(),
-            upcoming: queue.upcoming().len(),
-            similar: queue.similar().len(),
+        let steered = self.playback.read(cx).steered(cx);
+        let (listing, sections) = match &steered {
+            Some(steered) => Listing::steered(steered),
+            None => {
+                let queue = self.queue.read(cx);
+                let sections = Sections {
+                    past: queue.past().len(),
+                    current: queue.current().is_some(),
+                    manual: queue.manual().len(),
+                    upcoming: queue.upcoming().len(),
+                    similar: queue.similar().len(),
+                };
+                (Listing::Own(self.queue.clone()), sections)
+            }
         };
+        let remote = listing.remote();
         let empty = sections.len() == 0;
         if !cx.has_active_drag() {
             self.drop_gap = None;
@@ -1905,6 +2085,13 @@ impl Render for Aside {
 
         if self.past_len != sections.past {
             self.past_len = sections.past;
+            self.anchor = true;
+        }
+        let remote_track = steered
+            .as_ref()
+            .map(|steered| steered.track.as_ref().and_then(|track| track.id.clone()));
+        if self.remote_track != remote_track {
+            self.remote_track = remote_track;
             self.anchor = true;
         }
         if self.anchor && self.tab == SideTab::Queue {
@@ -1924,7 +2111,7 @@ impl Render for Aside {
                 }
             }))
             .when(self.titled || self.tab == SideTab::Queue, |this| {
-                this.child(self.header(sections, window, cx))
+                this.child(self.header(sections, remote, window, cx))
             })
             .child(
                 div()
@@ -1934,7 +2121,7 @@ impl Render for Aside {
                     .flex_col()
                     .flex_1()
                     .min_h_0()
-                    .when(self.tab == SideTab::Queue, |this| {
+                    .when(self.tab == SideTab::Queue && !remote, |this| {
                         this.on_drop(
                             cx.listener(|this, dragged: &DraggedPin, _, cx| this.land(dragged, cx)),
                         )
@@ -1947,15 +2134,20 @@ impl Render for Aside {
                     })
                     .when(self.tab == SideTab::Queue && !empty, |this| {
                         this.child(
-                            Scroller::listing("queue-rows", &self.scrollbar)
-                                .when(effects(), |this| this.fade_edges(px(FADE * 0.5), px(FADE)))
-                                .child(
-                                    self.rows(sections, cx)
-                                        .px_2()
-                                        .pt(px(FADE * 0.5))
-                                        .track_scroll(&self.scroll)
-                                        .size_full(),
-                                ),
+                            div().flex_1().min_h_0().child(
+                                Scroller::listing("queue-rows", &self.scrollbar)
+                                    .bottom_inset(self.bottom(cx))
+                                    .when(effects(), |this| {
+                                        this.fade_edges(px(FADE * 0.5), Pixels::ZERO)
+                                    })
+                                    .child(
+                                        self.rows(listing, sections, cx)
+                                            .px_2()
+                                            .pt(px(FADE * 0.5))
+                                            .track_scroll(&self.scroll)
+                                            .size_full(),
+                                    ),
+                            ),
                         )
                     })
                     .children(self.follow(cx))
@@ -1963,6 +2155,25 @@ impl Render for Aside {
             )
             .children(self.menu(cx))
     }
+}
+
+/// The part of a queue row that names who queued the song: a bullet, their round picture or
+/// initials, and "Added by NAME".
+fn adder(added: &Contributor, theme: ui::Theme) -> Div {
+    let face = theme.text(Text::Small) * ADDER_FACE;
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_1()
+        .child(BULLET)
+        .child(match &added.avatar {
+            Some(image) => Avatar::new(Some(image.clone()))
+                .size(face)
+                .into_any_element(),
+            None => Initials::new(added.name.clone(), face).into_any_element(),
+        })
+        .child(t!("queue-added-by", name = added.name.as_str()))
 }
 
 fn source_link(name: SharedString, to: Destination, cx: &App) -> impl IntoElement {
@@ -1995,6 +2206,100 @@ fn fixed_lyrics_lane(rows: &[SharedString], voice: Voice, sung: Sung) -> Div {
                 sung,
             )
         }))
+}
+
+/// One verse drawn the way the sheet draws it at rest, with its karaoke sweep at `position` and
+/// its romanized lane, but without the sheet's pointer handling, drift or growth animations.
+pub(crate) fn verse(
+    line: &music::LyricsLine,
+    look: VerseLook,
+    position: std::time::Duration,
+    theme: ui::Theme,
+) -> Div {
+    let karaoke = look.karaoke && effects();
+    let ended = line_has_passed(line, position);
+    let worded = karaoke && line.worded() && line.words.is_some();
+    let tint = match (look.active, ended) {
+        (true, _) if worded => theme.muted_foreground,
+        (true, _) => theme.foreground,
+        (false, true) => theme.muted_foreground.opacity(PAST),
+        (false, false) => theme.muted_foreground.opacity(AHEAD),
+    };
+    let sung = Sung {
+        karaoke,
+        lane: look.lane,
+        scripts: look.scripts,
+        theme,
+        karaoke_tint: mix(
+            theme.foreground,
+            tint,
+            primary_karaoke_fade(line, look.active, position),
+        ),
+        lift: 1.,
+        from: match line.voice.lead() {
+            true => gpui::point(0., 0.5),
+            false => gpui::point(1., 0.5),
+        },
+    };
+    let primary = match (
+        worded && primary_karaoke_visible(line, look.active, position),
+        line.words.as_deref(),
+    ) {
+        (true, Some(words)) => karaoke_lane(
+            &loose_plan(&line.text, words),
+            line.start,
+            words,
+            position,
+            look.size,
+            line.voice,
+            sung,
+        ),
+        _ => fixed_lyrics_lane(&[SharedString::from(line.text.clone())], line.voice, sung),
+    };
+    let active_size = active_verse_size(look.size);
+    let haze = match effects() {
+        true => look.haze,
+        false => 0.,
+    };
+
+    div()
+        .w_full()
+        .px_2()
+        .py_1()
+        .text_size(match look.active {
+            true => active_size,
+            false => look.size,
+        })
+        .line_height(active_size * ui::LEADING)
+        .text_color(tint)
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .when(!line.voice.lead(), |this| this.items_end().text_right())
+                .child(primary)
+                .when_some(
+                    selected_romanization(&line.romanized, look.scripts),
+                    |this, text| this.child(romanized_lyrics_lane(text, look.lane, &theme)),
+                ),
+        )
+        .when(haze > 0., |this| this.opacity(1. - VEIL * haze))
+        .map(|this| match look.size * BLUR * haze {
+            soft if soft > HAZE_LEAST => this.blur(soft),
+            _ => this,
+        })
+}
+
+/// The verse and lane sizes the sheet sets at `scale`, in the side panel or in Now playing,
+/// leaving out how much a large window grows Now playing's.
+pub(crate) fn verse_sizes(panel: bool, scale: f32, theme: &ui::Theme) -> (Pixels, Pixels) {
+    let verse = match panel {
+        true => theme.text(Text::Large),
+        false => theme.text(Text::Title) + FULLSCREEN_VERSE_GROWTH,
+    };
+    (verse * scale, theme.text(Text::Body) * scale)
 }
 
 // a lane with no measured plan of its own, split on the spot
@@ -2872,6 +3177,11 @@ fn viewport_along(scroll: &ScrollHandle, row: usize, view: Bounds<Pixels>, downw
         true => place.along,
         false => 1. - place.along,
     }
+}
+
+/// A row's blur rounded to the nearest `HAZE_STEP`.
+fn stepped(blur: Pixels) -> Pixels {
+    HAZE_STEP * (blur / HAZE_STEP).round()
 }
 
 fn line_has_passed(line: &music::LyricsLine, position: std::time::Duration) -> bool {

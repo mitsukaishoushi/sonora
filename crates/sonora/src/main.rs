@@ -5,6 +5,8 @@ mod assets;
 #[cfg(windows)]
 mod controller;
 mod dock;
+#[cfg(target_os = "macos")]
+mod gestures;
 mod http;
 mod logging;
 mod memory;
@@ -23,8 +25,9 @@ use gpui::{
     WindowOptions, px, size,
 };
 use music::LyricsProvider;
-use router::Screen;
-use state::Sonora;
+use music::link::Linked;
+use router::{Destination, Screen};
+use state::{Opened, Outcome, Sonora, Toasts};
 use ui::ActiveTheme as _;
 use ui::ThemeKind;
 use views::Root;
@@ -64,13 +67,6 @@ fn main() {
         single::Instance::Running => return,
         single::Instance::Failed => exit(1),
     }
-    // Only a lone spotify:/web link overrides the startup screen; one or more file paths from
-    // an "Open With" launch are handled after state exists, once the window loop is running.
-    let opened_start = match args.as_slice() {
-        [single] => router::destination(single),
-        _ => None,
-    };
-
     // Two rustls backends are compiled in: librespot, oauth2 and ytmusic still ask for ring,
     // while reqwest 0.13 and opensubsonic ask for aws-lc-rs. rustls refuses to guess between
     // them, so one is picked here. A second install only means another crate got there first.
@@ -107,6 +103,7 @@ fn main() {
             Arc::new(music::youtube::YouTubeProvider::new()),
             Arc::new(music::subsonic::SubsonicProvider::new()),
             Arc::new(music::deezer::DeezerProvider::new()),
+            Arc::new(music::tidal::TidalProvider::new()),
         ];
         let local_provider: Arc<dyn music::MusicProvider> =
             Arc::new(music::local::LocalProvider::new(
@@ -118,6 +115,7 @@ fn main() {
             ));
         let lyrics: Vec<Arc<dyn LyricsProvider>> = vec![
             Arc::new(music::local::LocalLyrics),
+            Arc::new(music::subsonic::SubsonicLyrics::new()),
             Arc::new(music::spotify::SpotifyLyrics::from_env()),
             Arc::new(music::youtube::YouTubeLyrics::new()),
             Arc::new(music::binimum::Binimum::new()),
@@ -131,13 +129,10 @@ fn main() {
         state::install_rounded_window_hook(set_corner_preference, cx);
         #[cfg(target_os = "macos")]
         state::install_rounded_window_hook(set_toolbar_style, cx);
-        let opened_a_destination = opened_start.is_some();
-        let start = opened_start.unwrap_or_else(|| {
-            let startup = Sonora::global(cx).settings.read(cx).startup().to_owned();
-            Screen::from_id(&startup)
-                .unwrap_or(Screen::Home)
-                .destination()
-        });
+        let startup = Sonora::global(cx).settings.read(cx).startup().to_owned();
+        let start = Screen::from_id(&startup)
+            .unwrap_or(Screen::Home)
+            .destination();
         router::init(start, cx);
         let (look, overrides, language, pack, stillness, pace, remembered) = {
             let settings = Sonora::global(cx).settings.read(cx);
@@ -154,6 +149,7 @@ fn main() {
         i18n::set(i18n::resolve(&language));
         icons::set(&pack);
         ui::motion::apply(stillness, pace, cx);
+        ui::refresh_primary_paste(cx);
         // linux answers late
         let reported = match cfg!(any(target_os = "linux", target_os = "freebsd")) {
             true => None,
@@ -175,15 +171,26 @@ fn main() {
         actions::register(lingers, cx);
         #[cfg(windows)]
         controller::install(cx);
+        #[cfg(target_os = "macos")]
+        gestures::install(cx);
         memory::watch(cx);
 
         open_window(cx);
         let session = Sonora::global(cx).session.clone();
         session.update(cx, |session, cx| session.restore(cx));
 
-        // A cold "Open With" launch reaches Playback through the same batch a hot hand-off
-        // uses, now that state exists to open the files into.
-        if !opened_a_destination && !args.is_empty() {
+        // A cold launch with files or links goes through the same batch a hot hand-off uses, now
+        // that state exists to open them into. A link waits there for its provider to sign in.
+        cx.subscribe(
+            &Sonora::global(cx).links.clone(),
+            |_, opened: &Opened, cx| {
+                if let Some(destination) = destination(&opened.0) {
+                    router::navigate(destination, cx);
+                }
+            },
+        )
+        .detach();
+        if !args.is_empty() {
             sender.send(args.clone()).ok();
         }
 
@@ -216,22 +223,43 @@ fn main() {
     });
 }
 
+/// Opens what a launch or a hand-off passed: a provider's link opens on that provider, and
+/// anything else is read as a file to play. An address no provider knows is refused with a
+/// toast rather than tried as a file.
 fn follow(items: &[String], cx: &mut App) {
     show_window(cx);
-    let mut destination = None;
+    let links = Sonora::global(cx).links.clone();
     let mut paths: Vec<PathBuf> = Vec::new();
     for item in items {
-        match router::destination(item) {
-            Some(found) => destination = Some(found),
-            None => paths.extend(local_path_from_arg(item)),
+        if links.update(cx, |links, cx| links.open(item, cx)) {
+            continue;
         }
-    }
-    if let Some(destination) = destination {
-        router::navigate(destination, cx);
+        match is_address(item) {
+            true => Toasts::show(Outcome::Failed, "toast-link-unreadable", cx),
+            false => paths.extend(local_path_from_arg(item)),
+        }
     }
     if !paths.is_empty() {
         let playback = Sonora::global(cx).playback.clone();
         playback.update(cx, |playback, cx| playback.open_paths(paths, cx));
+    }
+}
+
+/// Whether a launch argument is an address rather than a path, so one no provider reads is
+/// never tried as a file.
+fn is_address(item: &str) -> bool {
+    !item.starts_with("file://") && (item.contains("://") || item.starts_with("spotify:"))
+}
+
+/// The page a link opens on, for the kinds of link that open a page.
+fn destination(linked: &Linked) -> Option<Destination> {
+    match linked {
+        Linked::Track(id) => Some(Destination::Song(id.clone().into())),
+        Linked::Album(id) => Some(Destination::Album(id.clone().into())),
+        Linked::Artist(id) => Some(Destination::Artist(id.clone().into())),
+        Linked::Playlist(id) => Some(Destination::Playlist(id.clone().into())),
+        Linked::User(id) => Some(Destination::User(id.clone().into())),
+        Linked::Jam(_) | Linked::Short => None,
     }
 }
 
@@ -306,11 +334,16 @@ fn open_window(cx: &mut App) {
     let Sonora {
         session,
         cover: _,
+        devices: _,
+        downloads: _,
         drm: _,
+        equalizer: _,
         library,
+        links: _,
         history: _,
         lyrics: _,
         network: _,
+        outputs: _,
         pins: _,
         playback,
         potoken: _,
@@ -319,6 +352,7 @@ fn open_window(cx: &mut App) {
         scan: _,
         scrobbling: _,
         settings: _,
+        signal: _,
         updates: _,
         usage: _,
         wake: _,
@@ -513,6 +547,11 @@ fn hide_system_caption(handle: *mut std::ffi::c_void) {
 
 #[cfg(target_os = "windows")]
 const MAXIMIZE_SUBCLASS: usize = 1;
+
+/// Keeps a maximized window off the taskbar, which Windows covers once `hide_system_caption`
+/// drops `WS_SYSMENU`. The clamp works on the final rectangle and not in `WM_GETMINMAXINFO`,
+/// because Windows only carries that size over to a larger monitor when it is at least the
+/// size of the primary one.
 #[cfg(target_os = "windows")]
 fn clamp_maximize(handle: *mut std::ffi::c_void) {
     use windows_sys::Win32::UI::Shell::SetWindowSubclass;
@@ -520,6 +559,9 @@ fn clamp_maximize(handle: *mut std::ffi::c_void) {
     unsafe { SetWindowSubclass(handle, Some(work_area), MAXIMIZE_SUBCLASS, 0) };
 }
 
+/// Pulls each edge of a maximized window that covers its whole monitor back to that monitor's
+/// work area, keeping the frame overhang Windows adds past the other edges. Fullscreen strips
+/// `WS_CAPTION` but keeps `WS_MAXIMIZE`, so a window without a caption is left alone.
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn work_area(
     handle: *mut std::ffi::c_void,
@@ -529,24 +571,45 @@ unsafe extern "system" fn work_area(
     _subclass: usize,
     _data: usize,
 ) -> isize {
+    use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect,
     };
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{MINMAXINFO, WM_GETMINMAXINFO};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_STYLE, GetWindowLongPtrW, IsZoomed, SWP_NOMOVE, SWP_NOSIZE, WINDOWPOS,
+        WM_WINDOWPOSCHANGING, WS_CAPTION,
+    };
 
     unsafe {
-        if message == WM_GETMINMAXINFO {
-            let monitor = MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST);
+        if message == WM_WINDOWPOSCHANGING
+            && IsZoomed(handle) != 0
+            && GetWindowLongPtrW(handle, GWL_STYLE) & WS_CAPTION as isize == WS_CAPTION as isize
+        {
+            let position = &mut *(lparam as *mut WINDOWPOS);
+            let rect = RECT {
+                left: position.x,
+                top: position.y,
+                right: position.x + position.cx,
+                bottom: position.y + position.cy,
+            };
+            let monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST);
             let mut monitor_info: MONITORINFO = std::mem::zeroed();
             monitor_info.cbSize = size_of::<MONITORINFO>() as u32;
-            if GetMonitorInfoW(monitor, &mut monitor_info) != 0 {
+            if position.flags & (SWP_NOMOVE | SWP_NOSIZE) == 0
+                && GetMonitorInfoW(monitor, &mut monitor_info) != 0
+            {
                 let (screen, work) = (monitor_info.rcMonitor, monitor_info.rcWork);
-                let info = &mut *(lparam as *mut MINMAXINFO);
-                info.ptMaxPosition.x += work.left - screen.left;
-                info.ptMaxPosition.y += work.top - screen.top;
-                info.ptMaxSize.x -= (screen.right - screen.left) - (work.right - work.left);
-                info.ptMaxSize.y -= (screen.bottom - screen.top) - (work.bottom - work.top);
+                let covers = rect.left <= screen.left
+                    && rect.top <= screen.top
+                    && rect.right >= screen.right
+                    && rect.bottom >= screen.bottom;
+                if covers {
+                    position.x += work.left - screen.left;
+                    position.y += work.top - screen.top;
+                    position.cx -= (screen.right - screen.left) - (work.right - work.left);
+                    position.cy -= (screen.bottom - screen.top) - (work.bottom - work.top);
+                }
             }
         }
         DefSubclassProc(handle, message, wparam, lparam)

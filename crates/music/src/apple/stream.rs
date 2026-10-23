@@ -9,9 +9,12 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use serde::{Deserialize, Serialize};
 
 use crate::apple::auth::{self, AGENT};
 use crate::apple::progressive::Media;
+use crate::vault::{Recording, Shelf};
+use crate::{Encoding, Offer, Quality};
 use widevine::{self, Cdm};
 
 /// Where the web player asks what it may play.
@@ -21,9 +24,23 @@ const PLAYBACK: &str = "https://play.music.apple.com/WebObjects/MZPlay.woa/wa/we
 const LICENSE: &str =
     "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense";
 
-/// The only flavour a Widevine CDM can open. The `cbcp` flavours are delivered under Apple's
-/// own `skd://` key system, which it cannot speak.
-const FLAVOR: &str = "28:ctrp256";
+/// The flavours a Widevine CDM can open, AAC at 256 kbps and HE-AAC at 64 kbps. The `cbcp` and
+/// `ibhp` flavours are delivered under Apple's own `skd://` key system, which it cannot speak.
+const FLAVORS: [&str; 2] = ["28:ctrp256", "32:ctrp64"];
+
+/// The levels Apple Music serves Sonora, best first, one for each of `FLAVORS`.
+pub(crate) const QUALITIES: &[Offer] = &[
+    Offer {
+        quality: Quality::High,
+        encoding: Encoding::Aac { kbps: 256 },
+        up_to: false,
+    },
+    Offer {
+        quality: Quality::Low,
+        encoding: Encoding::Aac { kbps: 64 },
+        up_to: false,
+    },
+];
 
 /// How long a playlist or license body may be. Both are small; this only bounds what a wrong
 /// answer can cost.
@@ -40,6 +57,8 @@ pub struct Resolved {
     /// The key id, decoded from the tail of `key_uri`.
     pub key_id: Vec<u8>,
     pub duration: Option<Duration>,
+    /// The asset is the HE-AAC one, whose priming runs longer.
+    pub extended: bool,
 }
 
 /// A track ready to decode: decrypting as it is read, with its first seconds already in.
@@ -49,6 +68,18 @@ pub struct Resolved {
 pub struct Loaded {
     pub media: Media,
     pub duration: Option<Duration>,
+    /// The asset is the HE-AAC one, whose priming runs longer.
+    pub extended: bool,
+}
+
+/// What a kept track needs to be licensed again without the playback lookup. The key id is
+/// no secret, since the file's own `pssh` carries it.
+#[derive(Serialize, Deserialize)]
+struct Facts {
+    key_uri: String,
+    key_id: Vec<u8>,
+    duration_ms: Option<u64>,
+    extended: bool,
 }
 
 /// Resolves a catalog track, licenses it, and hands back a reader over its cleartext.
@@ -56,14 +87,49 @@ pub struct Loaded {
 /// The body and the license are fetched at the same time: the bytes do not depend on the
 /// license, and the CDM is only needed to read what has already arrived, so the round trip
 /// costs nothing that the download was not spending anyway.
-pub async fn prepare(http: &reqwest::Client, adam_id: &str, user_token: &str) -> Result<Loaded> {
+///
+/// With a shelf, the encrypted file is kept as it arrives. A kept track skips the lookup and
+/// the download but is licensed afresh on every play, so it plays only while Apple still
+/// hands this account its key.
+pub async fn prepare(
+    http: &reqwest::Client,
+    adam_id: &str,
+    user_token: &str,
+    quality: Quality,
+    shelf: Option<&Shelf>,
+) -> Result<Loaded> {
     widevine::require()?;
-    log::info!("apple: resolving track {adam_id}");
     let bearer = auth::bearer(http).await?;
-    let resolved = resolve(http, adam_id, &bearer, user_token).await?;
-
-    let response = open_asset(http, &resolved.asset, user_token).await?;
-    let mut media = Media::new(response);
+    let variant = quality.within(QUALITIES).id();
+    let recalled = match shelf {
+        Some(shelf) => recall(shelf, adam_id, variant).await,
+        None => None,
+    };
+    let (mut media, resolved) = match recalled {
+        Some(recalled) => recalled,
+        None => {
+            log::info!("apple: resolving track {adam_id}");
+            let resolved = resolve(http, adam_id, &bearer, user_token, quality).await?;
+            let response = open_asset(http, &resolved.asset, user_token).await?;
+            let total = response.content_length();
+            let source = match shelf {
+                Some(shelf) => {
+                    let facts = Facts {
+                        key_uri: resolved.key_uri.clone(),
+                        key_id: resolved.key_id.clone(),
+                        duration_ms: resolved
+                            .duration
+                            .map(|duration| duration.as_millis() as u64),
+                        extended: resolved.extended,
+                    };
+                    let facts = move || serde_json::to_vec(&facts).ok();
+                    shelf.keep(adam_id, variant, facts, response)
+                }
+                None => Recording::through(response),
+            };
+            (Media::pulling(source, total), resolved)
+        }
+    };
 
     log::info!("apple: opening widevine");
     let init = widevine::pssh(&resolved.key_id);
@@ -97,15 +163,34 @@ pub async fn prepare(http: &reqwest::Client, adam_id: &str, user_token: &str) ->
     Ok(Loaded {
         media,
         duration: resolved.duration,
+        extended: resolved.extended,
     })
 }
 
-/// Asks web playback for the track and reads the media playlist it points at.
+/// The kept encrypted file of a track and what licensing it takes, when the vault has it.
+async fn recall(shelf: &Shelf, adam_id: &str, variant: &str) -> Option<(Media, Resolved)> {
+    let kept = shelf.find(adam_id, variant).await?;
+    let facts = serde_json::from_slice::<Facts>(&kept.facts)
+        .inspect_err(|error| log::warn!("apple: the kept facts of {adam_id} do not read: {error}"))
+        .ok()?;
+    log::info!("apple: {adam_id} comes from the vault and is licensed again");
+    let resolved = Resolved {
+        asset: String::new(),
+        key_uri: facts.key_uri,
+        key_id: facts.key_id,
+        duration: facts.duration_ms.map(Duration::from_millis),
+        extended: facts.extended,
+    };
+    Some((Media::pulling(kept.source, Some(kept.length)), resolved))
+}
+
+/// Asks web playback for the track and reads the media playlist of its asset at `quality`.
 pub async fn resolve(
     http: &reqwest::Client,
     adam_id: &str,
     bearer: &str,
     user_token: &str,
+    quality: Quality,
 ) -> Result<Resolved> {
     let body = serde_json::json!({ "salableAdamId": adam_id });
     let response = http
@@ -140,8 +225,8 @@ pub async fn resolve(
         .and_then(serde_json::Value::as_array)
         .and_then(|songs| songs.first())
         .context("apple web playback listed no song")?;
-    let asset = select(song)?;
-    log::info!("apple: selected {FLAVOR}");
+    let (flavor, asset) = select(song, quality)?;
+    log::info!("apple: selected {flavor}");
 
     let playlist = read_playlist(http, &asset).await?;
     let (file, key_uri) =
@@ -162,11 +247,13 @@ pub async fn resolve(
         key_uri,
         key_id,
         duration: duration(song),
+        extended: flavor == FLAVORS[1],
     })
 }
 
-/// The `28:ctrp256` asset of a song entry.
-fn select(song: &serde_json::Value) -> Result<String> {
+/// The flavour and url of the asset a song entry is played from at `quality`. A song without
+/// that flavour plays the other one Widevine can open.
+fn select(song: &serde_json::Value, quality: Quality) -> Result<(&'static str, String)> {
     if song
         .get("hls-playlist-url")
         .and_then(serde_json::Value::as_str)
@@ -187,13 +274,22 @@ fn select(song: &serde_json::Value) -> Result<String> {
                 .unwrap_or("none")
         );
     }
-    assets
-        .iter()
-        .find(|asset| asset.get("flavor").and_then(serde_json::Value::as_str) == Some(FLAVOR))
-        .and_then(|asset| asset.get("URL").and_then(serde_json::Value::as_str))
-        .filter(|url| !url.is_empty())
-        .map(str::to_owned)
-        .with_context(|| format!("the track has no {FLAVOR} asset"))
+    let url = |flavor: &str| {
+        assets
+            .iter()
+            .find(|asset| asset.get("flavor").and_then(serde_json::Value::as_str) == Some(flavor))
+            .and_then(|asset| asset.get("URL").and_then(serde_json::Value::as_str))
+            .filter(|url| !url.is_empty())
+            .map(str::to_owned)
+    };
+    let wanted = match quality.within(QUALITIES) {
+        Quality::Low | Quality::Normal => FLAVORS[1],
+        Quality::High | Quality::Lossless | Quality::HiRes => FLAVORS[0],
+    };
+    std::iter::once(wanted)
+        .chain(FLAVORS.into_iter().filter(|flavor| *flavor != wanted))
+        .find_map(|flavor| url(flavor).map(|url| (flavor, url)))
+        .with_context(|| format!("the track has none of the {FLAVORS:?} assets"))
 }
 
 /// The track length, wherever this answer happens to carry it. Apple has moved it, and a
@@ -460,10 +556,13 @@ audio.mp4
         let song = serde_json::json!({
             "assets": [
                 { "flavor": "32:cbcp64", "URL": "https://x/cbcp.m3u8" },
-                { "flavor": FLAVOR, "URL": "https://x/ctr.m3u8" },
+                { "flavor": FLAVORS[0], "URL": "https://x/ctr.m3u8" },
             ]
         });
-        assert_eq!(select(&song).unwrap(), "https://x/ctr.m3u8");
+        assert_eq!(
+            select(&song, Quality::High).unwrap(),
+            (FLAVORS[0], "https://x/ctr.m3u8".to_owned())
+        );
     }
 
     #[test]
@@ -471,8 +570,8 @@ audio.mp4
         let song = serde_json::json!({
             "assets": [{ "flavor": "32:cbcp64", "URL": "https://x/cbcp.m3u8" }]
         });
-        assert!(select(&song).is_err());
-        assert!(select(&serde_json::json!({})).is_err());
+        assert!(select(&song, Quality::High).is_err());
+        assert!(select(&serde_json::json!({}), Quality::High).is_err());
     }
 
     #[test]
