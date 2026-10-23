@@ -58,12 +58,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.1
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: mini-player-windows
           shared-key: windows
           cache-on-failure: true
+
+      - name: Format release source
+        run: cargo fmt --all
 
       - name: Build portable Windows app
         run: cargo build --release --locked --package sonora
