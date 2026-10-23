@@ -19,7 +19,7 @@ use ui::{ActiveTheme as _, Artwork, Button, Dismiss, ExplicitBadge, Scrubber, Sc
 
 #[cfg(target_os = "windows")]
 use crate::mini_player::native;
-use crate::shared::transport::{NOTCH, next, previous, volume_icon};
+use crate::shared::transport::{NOTCH, fraction, next, previous, volume_icon};
 use self::motion::{Control, Feedback};
 use self::queue::Drawer;
 
@@ -257,7 +257,7 @@ impl Render for CompactPlayer {
         let explicit = track.is_some_and(|track| track.explicit);
         let total = track.map(|track| track.duration).unwrap_or(Duration::ZERO);
         let elapsed = self.pending.map(|fraction| total.mul_f32(fraction)).unwrap_or_else(|| playback.position());
-        let progress = self.pending.unwrap_or_else(|| playback.progress());
+        let progress = self.pending.unwrap_or_else(|| fraction(playback.position(), total));
         let seekable = track.is_some() && !total.is_zero();
         let loaded = track.is_some();
         let playing = playback.wants_playing();
@@ -417,3 +417,4 @@ fn apply(window: &mut Window, bounds: Option<Bounds<Pixels>>, _: Option<bool>, _
 fn restore(parent: AnyWindowHandle, cx: &mut App) {
     parent.update(cx, |_, window, _| window.activate_window()).ok();
 }
+
