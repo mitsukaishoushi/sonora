@@ -254,10 +254,14 @@ impl RenderOnce for HeroPlayButton {
         }
         let playing = {
             let playback = self.playback.read(cx);
-            let current = playback.track().and_then(|track| track.id.as_deref());
-            current
-                .filter(|current| self.listing.holds(current, cx))
-                .and_then(|_| playback.control())
+            match self.from.clone().or_else(|| self.listing.whence(cx)) {
+                Some(origin) => playback.playing_from(&origin, cx),
+                None => playback
+                    .track()
+                    .and_then(|track| track.id.as_deref())
+                    .filter(|current| self.listing.holds(current, cx))
+                    .and_then(|_| playback.control()),
+            }
         };
         let (label, icon) = match playing {
             Some(true) => (t!("play-pause"), "icons/pause.svg"),

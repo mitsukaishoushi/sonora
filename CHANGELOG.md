@@ -31,6 +31,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Position and size are remembered, and scrolling over the cover adjusts volume.
 - Open an always-on-top album-cover mini player from Now Playing or with Ctrl+Shift+M.
   Drag the cover to move it, hover for playback controls, and press Escape to return to Sonora.
+
+## [0.44.2] - 2026-10-25
+
+### Fixed
+
+- Playing YouTube Music videos and looking up lyrics no longer fills your YouTube search history
+  with song names. Only what you search for yourself shows up there.
+- The fullscreen visualizer keeps moving after a setting such as gapless playback restarts the
+  audio, instead of freezing until Sonora is restarted.
+- An album or playlist page shows Pause only when you are playing from that album or playlist,
+  not whenever the current song happens to be on it. Pressing Play there starts it.
+- YouTube Music tracks on an album with a numeric title, such as 17, show their real length
+  instead of the album title read as seconds.
+- Music sounds right again on 5.1 and 7.1 speakers. The left channel no longer plays from the
+  centre speaker with the front left silent, because Sonora now plays in stereo and lets your
+  system spread it across the speakers.
+- Sign-ins no longer disappear when a cleaner app or the system empties the cache folder.
+  Sonora now keeps them with its other data and moves existing ones there on the next launch.
+- Switching your sound output, such as picking another default device from the Windows taskbar,
+  no longer stops playback until Sonora is restarted.
+
 ## [0.44.1] - 2026-10-22
 
 ### Added
@@ -2328,7 +2349,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Initial release: a native Spotify client with playback, an interactive queue, the saved library,
 search, album, playlist, artist and song pages, context menus and adaptive theming.
 
-[unreleased]: https://github.com/sonorahq/sonora/compare/v0.44.1...HEAD
+[unreleased]: https://github.com/sonorahq/sonora/compare/v0.44.2...HEAD
+[0.44.2]: https://github.com/sonorahq/sonora/compare/v0.44.1...v0.44.2
 [0.44.1]: https://github.com/sonorahq/sonora/compare/v0.44.0...v0.44.1
 [0.44.0]: https://github.com/sonorahq/sonora/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/sonorahq/sonora/compare/v0.42.2...v0.43.0

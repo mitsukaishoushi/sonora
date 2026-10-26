@@ -66,6 +66,9 @@ alsa.workspace = true
 cpal = { workspace = true, features = ["pulseaudio"] }
 pulseaudio.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
 [dev-dependencies]
 env_logger.workspace = true
 rustls.workspace = true

@@ -489,7 +489,8 @@ impl Paced {
 /// This is what an engine that could not open a device at all waits on. A machine whose only
 /// device has gone, a Bluetooth headset that dropped its link, has nothing to reopen on and
 /// nothing else asks the system again, so without the watch playback stays silent until the app
-/// restarts. The watch ends when the engine listening on `notify` is gone.
+/// restarts. The watch ends when the engine listening on `notify` is gone, so the caller has to
+/// keep that engine alive while it waits, and an engine's audio thread does that by staying up.
 ///
 /// A device that is present is not enough: ALSA always names a default one, and without the
 /// sound server's plugin it never opens. Reporting it anyway would restart the engine every poll,

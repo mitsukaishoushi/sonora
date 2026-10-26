@@ -37,14 +37,14 @@ use sort::hits;
 /// How strongly an unsaved track's heart shows on its row.
 const SETTLED: f32 = 0.5;
 
-/// The current track and its `Playback::control`. A screen keeps the last one and redraws only
-/// when it changes.
-pub(crate) type PlaybackStatus = (Option<String>, Option<bool>);
+/// The current track, its `Playback::control` and its queue origin. A screen keeps the last
+/// status and redraws only when it changes, including a move between collections of the same song.
+pub(crate) type PlaybackStatus = (Option<String>, Option<bool>, Option<Origin>);
 
 pub(crate) fn playback_status(playback: &Entity<Playback>, cx: &App) -> PlaybackStatus {
     let playback = playback.read(cx);
     let track = playback.track().and_then(|track| track.id.clone());
-    (track, playback.control())
+    (track, playback.control(), playback.origin(cx).cloned())
 }
 pub(crate) trait Tracks: 'static {
     fn tracks<'a>(&self, cx: &'a App) -> &'a [Track];
