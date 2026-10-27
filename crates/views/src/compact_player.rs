@@ -266,6 +266,7 @@ impl Render for CompactPlayer {
         let volume = playback.volume();
         let font = crate::root::ui_font(self.settings.read(cx).font());
         let text = theme.text(Text::Small);
+        let timeline_height = ui::snapped((theme.metrics.pad * 2.5 * scale).max(text * ui::LEADING), window);
         let clock_width = text * match total.as_secs() >= 3600 { true => 5., false => 3.5 };
         let remaining = clock(total.saturating_sub(elapsed));
         let play_mix = self.feedback.playback(playing, window, cx);
@@ -288,11 +289,12 @@ impl Render for CompactPlayer {
                 .child(div().min_w_0().truncate().text_size(theme.text(Text::Label))
                     .text_color(theme.popover_foreground.opacity(0.65)).child(detail)));
 
-        let timeline = div().flex().items_center().gap_1().h(theme.metrics.pad * 3.).flex_none()
+        let timeline = div().flex().items_center().gap_1().h(timeline_height).flex_none()
             .text_size(text).font_features(tabular()).text_color(theme.popover_foreground.opacity(0.6))
             .child(div().w(clock_width).flex_none().whitespace_nowrap().child(clock(elapsed)))
             .child(div().flex_1().min_w_0().child(
                 Scrubber::new(&self.seek, progress)
+                    .h(timeline_height)
                     .colors(theme.popover_foreground.opacity(0.65), theme.popover_foreground.opacity(0.16), theme.popover_foreground)
                     .enabled(seekable)
                     .on_move(cx.listener(|this, fraction: &f32, _, cx| { this.pending = Some(*fraction); cx.notify(); }))
@@ -351,10 +353,12 @@ impl Render for CompactPlayer {
                 .child(previous_button).child(playback_button).child(next_button))
             .child(div().flex().flex_1().min_w_0().items_center().justify_end().child(queue_button));
 
+        // Keep seeking and transport together, leaving the breathing room below track details.
+        let transport = div().flex().flex_col().flex_none().child(timeline).child(controls);
         let player = div().flex().flex_col().justify_between().p(pad).flex_none()
             .h((self.drawer.base.size.height - PIXEL * 2.).max(PIXEL)).w_full()
             .on_scroll_wheel(cx.listener(Self::turn_volume))
-            .child(header).child(timeline).child(controls).into_any_element();
+            .child(header).child(transport).into_any_element();
         let drawer = self.queue_panel(queue_mix, window, cx);
         let contents = match self.drawer.above {
             true => vec![drawer, player],
