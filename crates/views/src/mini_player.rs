@@ -6,7 +6,7 @@ use gpui::{
     div, size,
 };
 use input::{CloseWindow, OpenCompactPlayer, ToggleCompactPlayer, ToggleMiniPlayer, WORKSPACE_CONTEXT};
-use state::{AppSettings, Playback, Queue, Sonora};
+use state::{AppSettings, Playback, Sonora};
 use ui::{ActiveTheme as _, Artwork, Button, Dismiss, Motion};
 
 use crate::shared::transport::{NOTCH, next, previous, toggle};
@@ -66,7 +66,6 @@ impl Position {
 /// An artwork-only companion window sharing the main player's playback and queue.
 pub(crate) struct MiniPlayer {
     playback: Entity<Playback>,
-    queue: Entity<Queue>,
     settings: Entity<AppSettings>,
     parent: AnyWindowHandle,
     focus: FocusHandle,
@@ -131,7 +130,6 @@ impl MiniPlayer {
                     });
                     Self {
                         playback,
-                        queue,
                         settings,
                         parent,
                         focus,
@@ -369,3 +367,4 @@ fn restore(parent: AnyWindowHandle, cx: &mut App) {
         .update(cx, |_, window, _| window.activate_window())
         .ok();
 }
+
