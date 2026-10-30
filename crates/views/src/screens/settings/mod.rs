@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::time::Duration;
 
+use gpui::accesskit::Role;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Context, Div, ElementId, Entity, FocusHandle, Pixels, Render, ScrollHandle,
@@ -66,6 +67,7 @@ enum Slot {
     Folders,
     Theme,
     Adaptive,
+    CommunityThemes,
     Icons,
     Corners,
     Typeface,
@@ -148,6 +150,7 @@ enum Slot {
     AdaptiveMenu,
     Version,
     Updates,
+    Channel,
     Log,
     License,
     Source,
@@ -247,6 +250,8 @@ pub struct SettingsView {
     popovers: Popovers,
     /// The theme family whose variant menu opened last, which owns that menu's popover.
     theme_variants: Option<String>,
+    /// The user's theme family waiting for the user to confirm its deletion.
+    deleting_theme: Option<String>,
     server: Entity<Input>,
     username: Entity<Input>,
     password: Entity<Input>,
@@ -405,6 +410,7 @@ impl SettingsView {
             pending_cache: None,
             popovers,
             theme_variants: None,
+            deleting_theme: None,
             server: cx.new(|cx| Input::new("login-server-hint", cx)),
             username: cx.new(|cx| Input::new("login-username-hint", cx)),
             password: cx.new(|cx| Input::new("login-password-hint", cx).masked()),
@@ -683,6 +689,10 @@ impl SettingsView {
             ),
             Slot::Theme => (t!("settings-theme"), t!("settings-theme-detail")),
             Slot::Adaptive => (t!("settings-adaptive"), t!("settings-adaptive-detail")),
+            Slot::CommunityThemes => (
+                t!("settings-theme-explore"),
+                t!("settings-theme-explore-detail"),
+            ),
             Slot::Ambient => (t!("settings-ambient"), t!("settings-ambient-detail")),
             Slot::AmbientMotion => (
                 t!("settings-ambient-motion"),
@@ -891,6 +901,10 @@ impl SettingsView {
                 t!("settings-check-updates"),
                 t!("settings-check-updates-detail"),
             ),
+            Slot::Channel => (
+                t!("settings-update-channel"),
+                t!("settings-update-channel-detail"),
+            ),
             Slot::Log => (t!("settings-log"), t!("settings-log-detail")),
             Slot::License => (t!("settings-license"), t!("settings-license-detail")),
             Slot::Source => (t!("settings-source"), t!("settings-source-detail")),
@@ -911,6 +925,7 @@ impl SettingsView {
             Slot::Folders => self.folders(cx),
             Slot::Theme | Slot::Icons | Slot::Corners => div().into_any_element(),
             Slot::Adaptive => self.adaptive_row(cx),
+            Slot::CommunityThemes => self.community_themes_row(cx),
             Slot::Ambient => self.ambient_row(cx),
             Slot::AmbientMotion => self.ambient_motion_row(cx),
             Slot::Visualizer => div().into_any_element(),
@@ -989,6 +1004,7 @@ impl SettingsView {
             },
             Slot::Version => self.version_row(),
             Slot::Updates => self.updates_row(cx),
+            Slot::Channel => self.channel_row(cx),
             Slot::Log => self.log_row(cx),
             Slot::License => self.license_row(cx),
             Slot::Source => self.source_row(cx),
@@ -1019,7 +1035,13 @@ impl SettingsView {
             cards,
             rows,
         } = group;
-        let heading = title.map(|key| group_heading(i18n::lookup(key, None), icon, cx));
+        let heading = title.map(|key| {
+            let label = i18n::lookup(key, None);
+            group_heading(label.clone(), icon, cx)
+                .id(SharedString::from(format!("settings-group-{key}")))
+                .role(Role::Heading)
+                .aria_label(label)
+        });
         let carded = cards.is_some();
         let cards = cards.map(|slot| {
             let cards = self.cards(slot, window, cx);
@@ -1314,7 +1336,11 @@ impl Render for SettingsView {
         let sign_in_for = self.sign_in_for.filter(|_| !taken);
 
         // a dialog takes the key focus, since escape only reaches the page from inside it
-        let dialog = taken || sign_in_for.is_some() || self.scrobble_prompt.is_some();
+        let theme_delete = self.theme_delete_modal(cx);
+        let dialog = taken
+            || sign_in_for.is_some()
+            || self.scrobble_prompt.is_some()
+            || theme_delete.is_some();
         match (dialog, self.grabbed) {
             (true, false) => {
                 window.focus(&self.focus, cx);
@@ -1369,6 +1395,7 @@ impl Render for SettingsView {
         .when_some(sign_in_for, |this, (slug, provider)| {
             this.child(self.sign_in_prompt(slug, provider, cx).into_any_element())
         })
+        .when_some(theme_delete, |this, modal| this.child(modal))
     }
 }
 

@@ -324,7 +324,7 @@ impl Render for MiniPlayer {
                                 .bg(theme.background.opacity(0.78))
                                 .child(previous(&self.playback, false, cx))
                                 .child(toggle(&self.playback, true, false, cx))
-                                .child(next(&self.playback, &self.queue, false, cx)),
+                                .child(next(&self.playback, false, cx)),
                         )
                         .with_animation(
                             ("mini-player-controls", self.hover_revision),

@@ -104,16 +104,19 @@ impl CompactPlayer {
         if visible <= Pixels::ZERO { return div().h_0().flex_none().into_any_element(); }
         let theme = *cx.theme();
         let queue = self.queue.read(cx);
-        let upcoming = queue.upcoming().len();
-        let total = upcoming + queue.similar().len();
+        let total = queue.upcoming().len();
         let revision = queue.revision();
         let scroll = self.drawer.scroll.clone();
         self.drawer.scrollbar.read(cx).sync();
 
         let rows = uniform_list("compact-queue-rows", total, cx.processor(move |this, range: Range<usize>, _, cx| {
-            let entries = this.queue.read(cx).upcoming().chain(this.queue.read(cx).similar())
-                .skip(range.start).take(range.len()).cloned().collect::<Vec<_>>();
-            entries.into_iter().enumerate().map(|(offset, track)| {
+            let queue = this.queue.read(cx);
+            let entries = queue.upcoming().enumerate()
+                .skip(range.start).take(range.len())
+                .filter_map(|(index, track)| queue.uid(state::QueuePosition::Upcoming(index))
+                    .map(|uid| (track.clone(), uid.to_owned())))
+                .collect::<Vec<_>>();
+            entries.into_iter().enumerate().map(|(offset, (track, uid))| {
                 let index = range.start + offset;
                 let playable = track.playable;
                 Card::new(("compact-queue-track", index), SharedString::from(track.name))
@@ -129,10 +132,7 @@ impl CompactPlayer {
                     .hover(move |style| style.bg(theme.popover_foreground.opacity(0.08)))
                     .when(playable, |card| card.press(cx.listener(move |this, _, _, cx| {
                         if this.queue.read(cx).revision() != revision { return; }
-                        this.playback.update(cx, |playback, cx| match index < upcoming {
-                            true => playback.play_upcoming(index, cx),
-                            false => playback.play_similar(index - upcoming, cx),
-                        });
+                        this.playback.update(cx, |playback, cx| playback.play_queue(&uid, cx));
                     })))
                     .into_any_element()
             }).collect()

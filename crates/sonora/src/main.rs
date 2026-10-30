@@ -2,6 +2,7 @@
 
 mod actions;
 mod assets;
+mod cli;
 #[cfg(windows)]
 mod controller;
 mod dock;
@@ -55,12 +56,9 @@ fn main() {
         }
         return;
     }
+    let args = cli::Cli::read().opened;
     logging::init();
 
-    let args: Vec<String> = std::env::args()
-        .skip(1)
-        .filter(|arg| !arg.starts_with('-'))
-        .collect();
     let (sender, mut links) = tokio::sync::mpsc::unbounded_channel::<Vec<String>>();
     match single::claim(&args, sender.clone()) {
         single::Instance::First => {}

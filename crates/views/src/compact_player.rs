@@ -333,7 +333,7 @@ impl Render for CompactPlayer {
                 this.playback.update(cx, |playback, cx| playback.toggle_play(cx));
             }));
         let playback_button = self.feedback_button(Control::Playback, playback_button, loaded, window, cx);
-        let next_button = next(&self.playback, &self.queue, false, cx).on_click(cx.listener(|this, _, _, cx| {
+        let next_button = next(&self.playback, false, cx).on_click(cx.listener(|this, _, _, cx| {
             this.press(Control::Next, cx);
             this.playback.update(cx, |playback, cx| playback.next(cx));
         }));

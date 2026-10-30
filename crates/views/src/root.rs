@@ -16,7 +16,9 @@ use state::{
 use ui::WindowFrame;
 use ui::{ActiveTheme as _, Dismiss, Entrance, Look, Stillness, Theme, ThemeKind, clear_listing};
 
-use crate::chrome::{Busy, JamInvite, TitleBar, TitleBarEvent, TitleBarOptions, Toolbar, Tooled};
+use crate::chrome::{
+    Busy, JamInvite, ThemeInvite, TitleBar, TitleBarEvent, TitleBarOptions, Toolbar, Tooled,
+};
 use crate::mini_player::MiniPlayer;
 use crate::compact_player::CompactPlayer;
 use crate::screens::search::SearchView;
@@ -99,6 +101,8 @@ pub struct Root {
     /// The question before a Jam link is joined, drawn over whichever shell is up so a link
     /// opened in fullscreen is answered there.
     jam_invite: Entity<JamInvite>,
+    /// The question before a linked theme is installed, drawn over whichever shell is up.
+    theme_invite: Entity<ThemeInvite>,
     shells: Shells,
     view: RootView,
     signing_in: bool,
@@ -367,6 +371,7 @@ impl Root {
             adaptive,
             ambient,
             jam_invite: cx.new(JamInvite::new),
+            theme_invite: cx.new(ThemeInvite::new),
             background: None,
             font: None,
             #[cfg(target_os = "windows")]
@@ -662,7 +667,11 @@ impl Root {
                 Box::new(move |cx| matches!(history.read(cx).state(), HistoryState::Loading))
             }
             Destination::Library(_) => shelf(Shelf::Streaming),
-            Destination::Local(_) => shelf(Shelf::Local),
+            Destination::Local(_) => {
+                let session = Sonora::global(cx).session.clone();
+                let local = shelf(Shelf::Local);
+                Box::new(move |cx| session.read(cx).scanning() || local(cx))
+            }
             Destination::Album(_) => {
                 let detail = self.screens.album_detail.clone()?;
                 Box::new(move |cx| detail.read(cx).is_loading())
@@ -1178,7 +1187,8 @@ impl Render for Root {
                         .opacity(hidden),
                 )
             })
-            .child(self.jam_invite.clone());
+            .child(self.jam_invite.clone())
+            .child(self.theme_invite.clone());
 
         let root = div()
             .relative()
