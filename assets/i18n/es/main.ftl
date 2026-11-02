@@ -103,6 +103,7 @@ menu-add-tracks-to-playlist = { $count ->
    *[other] Añadir { $count } pistas a una lista
 }
 menu-new-playlist = Nueva lista de reproducción
+menu-import-playlist = Importar lista…
 menu-edit-tags = Editar etiquetas
 menu-no-playlists = Sin listas de reproducción
 menu-search-playlists = Buscar una lista
@@ -154,8 +155,11 @@ menu-play-tracks-last = { $count ->
     [one] Reproducir { $count } pista al final
    *[other] Reproducir { $count } pistas al final
 }
-menu-song-radio = Ir a la radio de la canción
-menu-go-to-album = Ir al álbum
+menu-go-to = Ir a
+menu-artist = Artista
+menu-album = Álbum
+menu-radio = Radio
+menu-details = Detalles
 menu-go-to-artist = Ir al artista
 menu-view-details = Ver detalles
 menu-copy-link = Copiar enlace
@@ -164,8 +168,9 @@ menu-copy = Copiar
 menu-paste = Pegar
 menu-select-all = Seleccionar todo
 menu-remove-from-queue = Quitar de la cola
-menu-rename-playlist = Renombrar lista
+menu-edit-playlist = Editar lista
 menu-delete-playlist = Eliminar lista
+menu-export-playlist = Exportar lista…
 menu-add-playlist-to-library = Añadir a la biblioteca
 menu-remove-playlist-from-library = Quitar de la biblioteca
 menu-library-add = Añadir a la biblioteca
@@ -185,7 +190,12 @@ menu-play-artist = Reproducir artista
 # playlist editor
 playlist-name-placeholder = Nombre de la lista
 playlist-create-title = Crear lista de reproducción
-playlist-rename-title = Renombrar lista de reproducción
+playlist-edit-title = Editar lista
+playlist-cover-choose = Elegir imagen
+playlist-cover-remove = Quitar portada
+playlist-cover-unopenable = Sonora no puede abrir este archivo
+playlist-cover-too-large = Esta imagen pesa más de 40 MB
+playlist-cover-not-a-picture = Este archivo no es una imagen JPEG, PNG ni WebP
 playlist-delete-title = Eliminar lista de reproducción
 playlist-delete-confirm = ¿Eliminar “{ $name }”? Esta acción no se puede deshacer.
 playlist-again-title = ¿Añadirla otra vez?
@@ -252,10 +262,7 @@ player-previous = Pista anterior
 player-next = Pista siguiente
 player-fullscreen = Pantalla completa
 player-fullscreen-leave = Salir de pantalla completa
-player-devices = Dispositivos
 devices-this-computer = Este equipo
-devices-pause = Pausar
-devices-resume = Reanudar
 devices-jam-join = Unirse a una Jam…
 devices-jam-join-title = Unirse a una Jam
 devices-jam-join-detail = Pega el enlace que te compartió un amigo
@@ -263,15 +270,12 @@ devices-jam-paste = Pegar
 devices-jam-link-hint = Enlace de la Jam
 devices-jam-start = Iniciar una Jam
 devices-jam-copy = Copiar el enlace de la Jam
-devices-jam-code = Código QR
 devices-jam-code-menu = Mostrar el código QR
 devices-jam-code-title = Escanea para unirte a la Jam de { $host }
 devices-jam-code-title-anonymous = Escanea para unirte a la Jam
 devices-jam-code-close = Cerrar
 devices-jam-leave = Salir de la Jam
 devices-jam-end = Terminar la Jam
-devices-jam-banner = En la Jam de { $host }
-devices-jam-banner-anonymous = En una Jam
 devices-jam-more = +{ $count }
 devices-jam-host = Anfitrión
 devices-jam-you = Tú
@@ -283,8 +287,6 @@ devices-jam-invite-detail = { $count ->
    *[other] { $count } personas ya están en esta Jam.
 }
 devices-jam-invite-join = Unirse
-devices-elsewhere-banner = Sonando en { $device }
-devices-elsewhere-here = Reproducir aquí
 fullscreen-artwork = Portada
 
 # filters
@@ -423,6 +425,7 @@ release-meta = { $year } • { $kind }
 home-quick-picks = Selección rápida
 home-quick-picks-empty = Marca algunas canciones como favoritas y aparecerán aquí
 home-recently-added = Añadidos recientemente
+home-recently-played = Reproducidos recientemente
 home-playlists = Listas de reproducción
 home-favorite-albums = Álbumes favoritos
 home-artists = Artistas
@@ -431,6 +434,9 @@ home-collection-albums = Álbumes de tu colección
 # search page
 search-placeholder = ¿Qué quieres escuchar?
 search-browse = Explorar todo
+search-submit = Buscar
+search-recent = Búsquedas recientes
+search-forget = Quitar del historial
 genre-empty = Todavía no hay nada que mostrar aquí
 search-best-match = Mejor coincidencia
 search-no-matches = Sin coincidencias
@@ -973,7 +979,6 @@ settings-romanized-lyrics = Letra romanizada
 settings-romanized-lyrics-detail = Muestra la pronunciación generada localmente para los sistemas de escritura elegidos
 settings-romanization-writing-systems = Sistemas de escritura
 settings-lyrics-priority = Prioridad de proveedores
-settings-lyrics-priority-detail = Entre letras del mismo tipo, Sonora muestra la de la fuente situada más arriba
 settings-lyrics-providers-detail = Elige en qué servicios buscar letra
 settings-lyrics-providers-selected = { $count ->
     [one] { $count } seleccionado
@@ -1074,6 +1079,9 @@ saver-fps = { $fps } FPS
 
 toast-playlist-created = Lista creada
 toast-playlist-renamed = Lista renombrada
+toast-playlist-updated = Lista actualizada
+toast-playlist-cover-changed = Portada de la lista cambiada
+toast-playlist-cover-removed = Portada de la lista quitada
 toast-playlist-deleted = Lista eliminada
 toast-local-delete-failed = No se pudieron eliminar algunos archivos de pista
 toast-playlist-added = Lista añadida a tu biblioteca
@@ -1085,6 +1093,14 @@ toast-track-removed-unnamed = Se quitó de la lista
 toast-playlist-failed = No se pudo guardar ese cambio
 toast-playlist-busy = Todavía hay otro cambio en curso
 toast-playlist-signed-out = Inicia sesión para cambiar las listas
+toast-playlist-imported = Se importó { $name }
+toast-playlist-imported-partly = Se importó { $name } sin { $count ->
+        [one] una canción que no está
+       *[other] { $count } canciones que no están
+    } en tu biblioteca
+toast-playlist-import-empty = Ninguna canción de { $name } está en tu biblioteca
+toast-playlist-exported = Lista exportada
+toast-file-dialog-failed = No se pudo abrir el diálogo de archivos
 toast-queued-track = { $name } se añadió a la cola
 toast-next-track = { $name } suena a continuación
 toast-last-track = { $name } suena al final
@@ -1253,19 +1269,6 @@ toast-offline-mode = Estás sin conexión. Conéctate para escuchar esta canció
 offline-title = Estás sin conexión.
 offline-go-online = Conectarse
 toast-download-failed = No se pudieron obtener las pistas para descargar.
-toast-downloading = Descargando { $name }
-toast-downloading-songs = { $count ->
-    [one] Descargando { $count } pista
-   *[other] Descargando { $count } pistas
-}
-toast-downloaded = Se descargó { $name }
-toast-downloaded-songs = { $count ->
-    [one] Se descargó { $count } pista
-   *[other] Se descargaron { $count } pistas
-}
-toast-download-set-failed = No se pudieron descargar algunas pistas de { $name }
-toast-download-song-failed = No se pudo descargar { $name }
-toast-download-songs-failed = No se pudieron descargar algunas de las pistas
 toast-percent = { $percent } %
 toast-download-cancelled = Se canceló la descarga de { $name }
 toast-downloads-cancelled = { $count ->

@@ -104,6 +104,7 @@ menu-add-tracks-to-playlist = { $count ->
    *[other] Přidat { $count } skladeb do playlistu
 }
 menu-new-playlist = Nový playlist
+menu-import-playlist = Importovat playlist…
 menu-edit-tags = Upravit tagy
 menu-no-playlists = Žádné playlisty
 menu-search-playlists = Hledat playlist
@@ -168,8 +169,11 @@ menu-play-tracks-last = { $count ->
     [few] Přehrát { $count } skladby jako poslední
    *[other] Přehrát { $count } skladeb jako poslední
 }
-menu-song-radio = Přejít na rádio skladby
-menu-go-to-album = Přejít na album
+menu-go-to = Přejít na
+menu-artist = Interpret
+menu-album = Album
+menu-radio = Rádio
+menu-details = Podrobnosti
 menu-go-to-artist = Přejít na interpreta
 menu-view-details = Zobrazit podrobnosti
 menu-copy-link = Kopírovat odkaz
@@ -178,8 +182,9 @@ menu-copy = Kopírovat
 menu-paste = Vložit
 menu-select-all = Vybrat vše
 menu-remove-from-queue = Odebrat z fronty
-menu-rename-playlist = Přejmenovat playlist
+menu-edit-playlist = Upravit playlist
 menu-delete-playlist = Smazat playlist
+menu-export-playlist = Exportovat playlist…
 menu-add-playlist-to-library = Přidat do knihovny
 menu-remove-playlist-from-library = Odebrat z knihovny
 menu-library-add = Přidat do knihovny
@@ -201,7 +206,12 @@ menu-play-artist = Přehrát interpreta
 # playlist editor
 playlist-name-placeholder = Název playlistu
 playlist-create-title = Vytvořit playlist
-playlist-rename-title = Přejmenovat playlist
+playlist-edit-title = Upravit playlist
+playlist-cover-choose = Vybrat obrázek
+playlist-cover-remove = Odebrat obal
+playlist-cover-unopenable = Sonora tento soubor nedokáže otevřít
+playlist-cover-too-large = Tento obrázek je větší než 40 MB
+playlist-cover-not-a-picture = Tento soubor není obrázek JPEG, PNG ani WebP
 playlist-delete-title = Smazat playlist
 playlist-delete-confirm = Smazat „{ $name }“? Tuto akci nelze vzít zpět.
 playlist-again-title = Přidat znovu?
@@ -274,10 +284,7 @@ player-previous = Předchozí skladba
 player-next = Další skladba
 player-fullscreen = Celá obrazovka
 player-fullscreen-leave = Ukončit celou obrazovku
-player-devices = Zařízení
 devices-this-computer = Tento počítač
-devices-pause = Pozastavit
-devices-resume = Pokračovat
 devices-jam-join = Připojit se k Jamu…
 devices-jam-join-title = Připojit se k Jamu
 devices-jam-join-detail = Vlož odkaz, který ti poslal kamarád
@@ -285,15 +292,12 @@ devices-jam-paste = Vložit
 devices-jam-link-hint = Odkaz na Jam
 devices-jam-start = Spustit Jam
 devices-jam-copy = Kopírovat odkaz na Jam
-devices-jam-code = QR kód
 devices-jam-code-menu = Zobrazit QR kód
 devices-jam-code-title = Naskenuj a připoj se k Jamu uživatele { $host }
 devices-jam-code-title-anonymous = Naskenuj a připoj se k Jamu
 devices-jam-code-close = Zavřít
 devices-jam-leave = Opustit Jam
 devices-jam-end = Ukončit Jam
-devices-jam-banner = V Jamu uživatele { $host }
-devices-jam-banner-anonymous = V Jamu
 devices-jam-more = +{ $count }
 devices-jam-host = Hostitel
 devices-jam-you = Ty
@@ -306,8 +310,6 @@ devices-jam-invite-detail = { $count ->
    *[other] V tomto Jamu už je { $count } lidí.
 }
 devices-jam-invite-join = Připojit se
-devices-elsewhere-banner = Hraje na zařízení { $device }
-devices-elsewhere-here = Přehrát tady
 fullscreen-artwork = Obálka
 
 # filters
@@ -450,6 +452,7 @@ release-meta = { $year } • { $kind }
 home-quick-picks = Rychlý výběr
 home-quick-picks-empty = Označ pár skladeb jako oblíbené a objeví se tady
 home-recently-added = Nedávno přidané
+home-recently-played = Nedávno přehrávané
 home-playlists = Playlisty
 home-favorite-albums = Oblíbená alba
 home-artists = Interpreti
@@ -458,6 +461,9 @@ home-collection-albums = Alba z tvé knihovny
 # search page
 search-placeholder = Co chceš poslouchat?
 search-browse = Procházet vše
+search-submit = Hledat
+search-recent = Nedávná hledání
+search-forget = Odebrat z historie
 genre-empty = Tady zatím nic není
 search-best-match = Nejlepší shoda
 search-no-matches = Žádné výsledky
@@ -1006,7 +1012,6 @@ settings-romanized-lyrics = Romanizované texty
 settings-romanized-lyrics-detail = Zobrazuje místně vytvořenou výslovnost pro vybrané písmové systémy
 settings-romanization-writing-systems = Písmové systémy
 settings-lyrics-priority = Priorita poskytovatelů
-settings-lyrics-priority-detail = Mezi texty stejného druhu Sonora zobrazí ten ze zdroje výš v seznamu
 settings-lyrics-providers-detail = Vyber služby, ve kterých se mají hledat texty písní
 settings-lyrics-providers-selected = { $count ->
     [one] Vybrán { $count } poskytovatel
@@ -1108,6 +1113,9 @@ saver-fps = { $fps } FPS
 
 toast-playlist-created = Playlist vytvořen
 toast-playlist-renamed = Playlist přejmenován
+toast-playlist-updated = Playlist upraven
+toast-playlist-cover-changed = Obal playlistu změněn
+toast-playlist-cover-removed = Obal playlistu odebrán
 toast-playlist-deleted = Playlist smazán
 toast-local-delete-failed = Některé soubory skladeb se nepodařilo smazat
 toast-playlist-added = Playlist přidán do tvé knihovny
@@ -1119,6 +1127,14 @@ toast-track-removed-unnamed = Odebráno z playlistu
 toast-playlist-failed = Tuto změnu se nepodařilo uložit
 toast-playlist-busy = Jiná změna ještě probíhá
 toast-playlist-signed-out = Pro změnu playlistů se přihlas
+toast-playlist-imported = Importováno: { $name }
+toast-playlist-imported-partly = Importováno: { $name }, bez { $count ->
+        [one] jedné skladby, která není
+       *[other] { $count } skladeb, které nejsou
+    } v tvé knihovně
+toast-playlist-import-empty = Žádná skladba z { $name } není v tvé knihovně
+toast-playlist-exported = Playlist exportován
+toast-file-dialog-failed = Dialog pro výběr souboru se nepodařilo otevřít
 toast-queued-track = Do fronty přidáno: { $name }
 toast-next-track = { $name } se přehraje jako další
 toast-last-track = { $name } se přehraje jako poslední
@@ -1315,21 +1331,6 @@ toast-offline-mode = Jsi offline. Pro streamování této skladby přejdi online
 offline-title = Jsi offline.
 offline-go-online = Přejít online
 toast-download-failed = Nepodařilo se zjistit, které skladby stáhnout.
-toast-downloading = Stahuje se { $name }
-toast-downloading-songs = { $count ->
-    [one] Stahuje se { $count } skladba
-    [few] Stahují se { $count } skladby
-   *[other] Stahuje se { $count } skladeb
-}
-toast-downloaded = Staženo: { $name }
-toast-downloaded-songs = { $count ->
-    [one] Stažena { $count } skladba
-    [few] Staženy { $count } skladby
-   *[other] Staženo { $count } skladeb
-}
-toast-download-set-failed = Některé skladby z { $name } se nepodařilo stáhnout
-toast-download-song-failed = { $name } se nepodařilo stáhnout
-toast-download-songs-failed = Některé skladby se nepodařilo stáhnout
 toast-percent = { $percent } %
 toast-download-cancelled = Stahování { $name } zrušeno
 toast-downloads-cancelled = { $count ->

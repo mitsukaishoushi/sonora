@@ -103,6 +103,7 @@ menu-add-tracks-to-playlist = { $count ->
    *[other] Shto { $count } këngë te lista e luajtjes
 }
 menu-new-playlist = Listë e re luajtjeje
+menu-import-playlist = Importo listë luajtjeje…
 menu-edit-tags = Ndrysho etiketat
 menu-no-playlists = Asnjë listë luajtjeje
 menu-search-playlists = Kërko një listë luajtjeje
@@ -154,8 +155,11 @@ menu-play-tracks-last = { $count ->
     [one] Luaj { $count } këngë të fundit
    *[other] Luaj { $count } këngë të fundit
 }
-menu-song-radio = Shko te radio e këngës
-menu-go-to-album = Shko te albumi
+menu-go-to = Shko te
+menu-artist = Artisti
+menu-album = Albumi
+menu-radio = Radio
+menu-details = Detajet
 menu-go-to-artist = Shko te artisti
 menu-view-details = Shiko detajet
 menu-copy-link = Kopjo lidhjen
@@ -164,8 +168,9 @@ menu-copy = Kopjo
 menu-paste = Ngjit
 menu-select-all = Përzgjidh të gjitha
 menu-remove-from-queue = Hiq nga radha
-menu-rename-playlist = Riemërto listën e luajtjes
+menu-edit-playlist = Ndrysho listën e luajtjes
 menu-delete-playlist = Fshi listën e luajtjes
+menu-export-playlist = Eksporto listën e luajtjes…
 menu-add-playlist-to-library = Shto te Biblioteka
 menu-remove-playlist-from-library = Hiq nga Biblioteka
 menu-library-add = Shto te Biblioteka
@@ -185,7 +190,12 @@ menu-play-artist = Luaj artistin
 # playlist editor
 playlist-name-placeholder = Emri i listës së luajtjes
 playlist-create-title = Krijo listë luajtjeje
-playlist-rename-title = Riemërto listën e luajtjes
+playlist-edit-title = Ndrysho listën e luajtjes
+playlist-cover-choose = Zgjidh figurë
+playlist-cover-remove = Hiq kopertinën
+playlist-cover-unopenable = Sonora nuk e hap dot këtë skedar
+playlist-cover-too-large = Kjo figurë është më e madhe se 40 MB
+playlist-cover-not-a-picture = Ky skedar nuk është figurë JPEG, PNG ose WebP
 playlist-delete-title = Fshi listën e luajtjes
 playlist-delete-confirm = Fshi “{ $name }”? Kjo nuk mund të zhbëhet.
 playlist-again-title = Ta shtosh përsëri?
@@ -252,10 +262,7 @@ player-previous = Kënga e mëparshme
 player-next = Kënga e radhës
 player-fullscreen = Ekran i plotë
 player-fullscreen-leave = Dil nga ekrani i plotë
-player-devices = Pajisjet
 devices-this-computer = Ky kompjuter
-devices-pause = Pauzë
-devices-resume = Vazhdo
 devices-jam-join = Bashkohu në një Jam…
 devices-jam-join-title = Bashkohu në një Jam
 devices-jam-join-detail = Ngjit lidhjen që të ndau një mik
@@ -263,15 +270,12 @@ devices-jam-paste = Ngjit
 devices-jam-link-hint = Lidhja e Jam-it
 devices-jam-start = Nis një Jam
 devices-jam-copy = Kopjo lidhjen e Jam-it
-devices-jam-code = Kodi QR
 devices-jam-code-menu = Shfaq kodin QR
 devices-jam-code-title = Skano për t'u bashkuar në Jam-in e { $host }
 devices-jam-code-title-anonymous = Skano për t'u bashkuar në Jam
 devices-jam-code-close = Mbyll
 devices-jam-leave = Largohu nga Jam-i
 devices-jam-end = Përfundo Jam-in
-devices-jam-banner = Në Jam-in e { $host }
-devices-jam-banner-anonymous = Në një Jam
 devices-jam-more = +{ $count }
 devices-jam-host = Organizatori
 devices-jam-you = Ti
@@ -283,8 +287,6 @@ devices-jam-invite-detail = { $count ->
    *[other] { $count } persona janë tashmë në këtë Jam.
 }
 devices-jam-invite-join = Bashkohu
-devices-elsewhere-banner = Duke luajtur në { $device }
-devices-elsewhere-here = Luaj këtu
 fullscreen-artwork = Kopertina
 
 # filters
@@ -423,6 +425,7 @@ release-meta = { $year } • { $kind }
 home-quick-picks = Zgjedhje të shpejta
 home-quick-picks-empty = Pëlqe disa këngë dhe ato do të shfaqen këtu
 home-recently-added = Shtuar së fundi
+home-recently-played = Luajtur së fundi
 home-playlists = Lista luajtjeje
 home-favorite-albums = Albumet e preferuara
 home-artists = Artistë
@@ -431,6 +434,9 @@ home-collection-albums = Albume nga koleksioni yt
 # search page
 search-placeholder = Çfarë do të dëgjosh?
 search-browse = Shfleto të gjitha
+search-submit = Kërko
+search-recent = Kërkimet e fundit
+search-forget = Hiqe nga historiku
 genre-empty = Ende asgjë për të shfaqur këtu
 search-best-match = Përputhja më e mirë
 search-no-matches = Asnjë përputhje
@@ -973,7 +979,6 @@ settings-romanized-lyrics = Tekste të romanizuara
 settings-romanized-lyrics-detail = Shfaq shqiptimin e gjeneruar lokalisht për sistemet e zgjedhura të shkrimit
 settings-romanization-writing-systems = Sistemet e shkrimit
 settings-lyrics-priority = Përparësia e ofruesve
-settings-lyrics-priority-detail = Midis teksteve të të njëjtit lloj, Sonora shfaq burimin që është më lart
 settings-lyrics-providers-detail = Zgjidh cilët shërbime të kërkohen për tekste
 settings-lyrics-providers-selected = { $count ->
     [one] { $count } i përzgjedhur
@@ -1074,6 +1079,9 @@ saver-fps = { $fps } FPS
 
 toast-playlist-created = Lista e luajtjes u krijua
 toast-playlist-renamed = Lista e luajtjes u riemërtua
+toast-playlist-updated = Lista e luajtjes u përditësua
+toast-playlist-cover-changed = Kopertina e listës së luajtjes u ndryshua
+toast-playlist-cover-removed = Kopertina e listës së luajtjes u hoq
 toast-playlist-deleted = Lista e luajtjes u fshi
 toast-local-delete-failed = Disa skedarë këngësh nuk mund të fshiheshin
 toast-playlist-added = Lista e luajtjes u shtua te biblioteka
@@ -1085,6 +1093,14 @@ toast-track-removed-unnamed = U hoq nga lista e luajtjes
 toast-playlist-failed = Ai ndryshim nuk mund të ruhej
 toast-playlist-busy = Një ndryshim tjetër është ende në vazhdim
 toast-playlist-signed-out = Hyr për të ndryshuar listat e luajtjes
+toast-playlist-imported = U importua { $name }
+toast-playlist-imported-partly = U importua { $name }, pa { $count ->
+        [one] një këngë që nuk është
+       *[other] { $count } këngë që nuk janë
+    } në bibliotekën tënde
+toast-playlist-import-empty = Asnjë këngë nga { $name } nuk është në bibliotekën tënde
+toast-playlist-exported = Lista e luajtjes u eksportua
+toast-file-dialog-failed = Dritarja e skedarëve nuk mund të hapej
 toast-queued-track = { $name } u shtua në radhë
 toast-next-track = { $name } luhet e radhës
 toast-last-track = { $name } luhet e fundit
@@ -1253,19 +1269,6 @@ toast-offline-mode = Je jashtë linje. Kalo në linjë për ta transmetuar kët�
 offline-title = Je jashtë linje.
 offline-go-online = Kalo në linjë
 toast-download-failed = Këngët për shkarkim nuk mund të listoheshin.
-toast-downloading = Duke shkarkuar { $name }
-toast-downloading-songs = { $count ->
-    [one] Duke shkarkuar { $count } këngë
-   *[other] Duke shkarkuar { $count } këngë
-}
-toast-downloaded = U shkarkua { $name }
-toast-downloaded-songs = { $count ->
-    [one] U shkarkua { $count } këngë
-   *[other] U shkarkuan { $count } këngë
-}
-toast-download-set-failed = Disa këngë të { $name } nuk mund të shkarkoheshin
-toast-download-song-failed = { $name } nuk mund të shkarkohej
-toast-download-songs-failed = Disa nga këngët nuk mund të shkarkoheshin
 toast-percent = { $percent }%
 toast-download-cancelled = Shkarkimi i { $name } u anulua
 toast-downloads-cancelled = { $count ->

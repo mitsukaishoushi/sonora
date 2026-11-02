@@ -6,6 +6,7 @@ mod checkbox;
 mod controls;
 mod deck;
 mod drag;
+mod dropdown;
 mod explicit;
 mod filters;
 mod form;
@@ -26,6 +27,7 @@ mod modal;
 pub mod motion;
 mod notice;
 mod option_card;
+mod otp;
 mod palette;
 mod panel;
 mod picker;
@@ -69,7 +71,8 @@ pub use controls::WindowControls;
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub use controls::WindowFrame;
 pub use deck::Deck;
-pub use drag::{Edge, Ghost, drop_gap, drop_marker, grip};
+pub use drag::{Edge, Ghost, drop_gap, drop_into, drop_marker, grip};
+pub use dropdown::Dropdown;
 pub use explicit::ExplicitBadge;
 pub use filters::{
     Filter, FilterChange, FlagAxis, RangeAxis, RangeScrubber, RangeState, SortAxis, Unit,
@@ -89,7 +92,10 @@ pub use input::{
     WordLeft, WordRight, refresh_primary_paste,
 };
 pub use kbd::Kbd;
-pub use label::{Tails, eyebrow, faint, heading, upper, vacant};
+pub use label::{
+    Tails, eyebrow, faint, heading, spoken, spoken_eyebrow, spoken_heading, spoken_vacant, upper,
+    vacant,
+};
 pub use layout::{ALWAYS, MIN_CONTENT, ROOMY, Room, SNUG, VAST, WIDE};
 pub use lazy::Lazy;
 pub use level_meter::LevelMeter;
@@ -103,6 +109,7 @@ pub use motion::{
 };
 pub use notice::Notice;
 pub use option_card::OptionCard;
+pub use otp::{OtpInput, OtpSlots};
 pub use palette::{CoverPalette, palette, tint};
 pub use panel::{Panel, Side};
 pub use picker::Picker;

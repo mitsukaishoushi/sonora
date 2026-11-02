@@ -1,5 +1,6 @@
 mod artist;
 mod catalog;
+mod control;
 mod cover;
 mod detail;
 mod devices;
@@ -12,6 +13,7 @@ mod history;
 mod home;
 mod library;
 mod links;
+mod listening;
 mod logging;
 mod lyrics;
 mod mosaic;
@@ -43,19 +45,24 @@ mod wake;
 mod window_shape;
 
 pub use artist::{ArtistDetail, ArtistDetailEvent};
+pub use control::Control;
 pub use cover::Cover;
 pub use detail::{Collection, Detail, Header};
 pub use devices::Devices;
-pub use downloads::{Downloads, DownloadsChanged, Progress, downloaded};
+pub use downloads::{
+    Active, Downloads, DownloadsChanged, Pending, Progress, Remaining, Subject, downloaded,
+};
 pub use drm::{CdmState, Drm};
 pub use equalizer::{DeviceRule, Equalizer, RuleDevice, Sound};
 pub use genre::{GenreDetails, Genres};
 pub use history::{History, HistoryState};
 pub use home::Home;
 pub use library::{
-    Addition, Library, LibraryEvent, LibraryPart, LibraryState, Problem, Ready, Shelf,
+    Addition, CoverEdit, Leaving, Library, LibraryEvent, LibraryPart, LibraryState, Problem, Ready,
+    Shelf, cover_problem,
 };
 pub use links::{Links, Opened};
+pub use listening::{CODE_LENGTH as SESSION_CODE_LENGTH, Listening, Member as RoomMember, Room};
 pub use logging::log_file;
 pub use lyrics::{Lyrics, LyricsState};
 pub use music::connect::{Elsewhere, Repeat};
@@ -201,6 +208,7 @@ pub(crate) fn settled<T>(result: Result<T>, cx: &mut gpui::App) -> std::result::
 
 pub struct Sonora {
     pub session: Entity<Session>,
+    pub control: Entity<Control>,
     pub cover: Entity<Cover>,
     pub devices: Entity<Devices>,
     pub downloads: Entity<Downloads>,
@@ -208,6 +216,7 @@ pub struct Sonora {
     pub equalizer: Entity<Equalizer>,
     pub library: Entity<Library>,
     pub links: Entity<Links>,
+    pub listening: Entity<Listening>,
     pub history: Entity<History>,
     pub lyrics: Entity<Lyrics>,
     pub network: Entity<Network>,
@@ -363,7 +372,18 @@ pub fn init(
             cx,
         )
     });
+    let listening = cx.new(|cx| {
+        Listening::new(
+            playback.clone(),
+            queue.clone(),
+            session.clone(),
+            settings.clone(),
+            io.clone(),
+            cx,
+        )
+    });
     let links = cx.new(|cx| Links::new(session.clone(), devices.clone(), settings.clone(), cx));
+    let control = cx.new(|cx| Control::new(session.clone(), playback.clone(), library.clone(), cx));
     discord::attach(
         playback.clone(),
         settings.clone(),
@@ -376,6 +396,7 @@ pub fn init(
 
     cx.set_global(Sonora {
         session,
+        control,
         cover,
         devices,
         downloads,
@@ -383,6 +404,7 @@ pub fn init(
         equalizer,
         library,
         links,
+        listening,
         history,
         lyrics,
         network,

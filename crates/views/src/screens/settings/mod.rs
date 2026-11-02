@@ -39,6 +39,7 @@ mod player_bar;
 mod preview;
 mod rows;
 mod scrobbling;
+mod sessions;
 mod sound;
 mod storage;
 mod themes;
@@ -115,6 +116,9 @@ enum Slot {
     SpotifyConnect,
     SpotifyConnectName,
     SpotifyConnectCustom,
+    SessionsButton,
+    SessionsOfficial,
+    SessionsServer,
     Discord,
     DiscordName,
     DiscordShowPaused,
@@ -263,6 +267,8 @@ pub struct SettingsView {
     scrobble_second: Entity<Input>,
     /// The field for the custom name Sonora goes by in Spotify's device list.
     connect_name: Entity<Input>,
+    /// The address of the listener's own Sonora Sessions server.
+    sessions_server: Entity<Input>,
     /// The service whose link dialog is open, by slug.
     scrobble_prompt: Option<&'static str>,
     /// The provider whose sign-in choice is up, by slug and name.
@@ -381,6 +387,24 @@ impl SettingsView {
         })
         .detach();
 
+        let sessions_server =
+            cx.new(|cx| Input::new("settings-sessions-server-hint", cx).compact());
+        let typed = settings.read(cx).sessions_server().to_owned();
+        sessions_server.update(cx, |input, cx| input.set_text(typed, cx));
+        // the Save button stands held while the server it saves is checked, and the field wears a
+        // red border from a save that was turned down until one goes through
+        let listening = Sonora::global(cx).listening.clone();
+        cx.observe(&listening, |this: &mut Self, listening, cx| {
+            let rejected = listening.read(cx).rejected();
+            this.sessions_server
+                .update(cx, |input, cx| input.set_invalid(rejected, cx));
+            cx.notify();
+        })
+        .detach();
+        // what is typed is kept only once the Save button finds its server answers
+        cx.observe(&sessions_server, |_, _, cx| cx.notify())
+            .detach();
+
         let popovers = Popovers::default();
         let output_picker = cx.new(|cx| OutputPicker::new(outputs.clone(), popovers.clone(), cx));
         let previews = preview::Previews::new(cx);
@@ -426,6 +450,7 @@ impl SettingsView {
             scrobble_first: cx.new(|cx| Input::new("settings-scrobble-key", cx)),
             scrobble_second: cx.new(|cx| Input::new("settings-scrobble-secret", cx)),
             connect_name,
+            sessions_server,
             scrobble_prompt: None,
             languages,
             typefaces,
@@ -601,7 +626,9 @@ impl SettingsView {
             self.lazy((page.id(), 1_usize), cx, move |this, window, cx| {
                 let previews = &this.previews;
                 match page {
-                    SettingsPage::NowPlaying => preview::now_playing::preview(this, window, cx),
+                    SettingsPage::NowPlaying => {
+                        preview::now_playing::preview(&previews.now_playing, this, window, cx)
+                    }
                     SettingsPage::Lyrics => {
                         preview::lyrics::preview(&previews.lyrics, this, window, cx)
                     }
@@ -866,6 +893,9 @@ impl SettingsView {
                 t!("settings-spotify-connect-custom"),
                 t!("settings-spotify-connect-custom-detail"),
             ),
+            Slot::SessionsButton => (t!("settings-sessions-button"), SharedString::default()),
+            Slot::SessionsOfficial => (t!("settings-sessions-official"), SharedString::default()),
+            Slot::SessionsServer => (t!("settings-sessions-server"), SharedString::default()),
             Slot::Discord => (t!("settings-discord"), t!("settings-discord-detail")),
             Slot::DiscordName => (
                 t!("settings-discord-name"),
@@ -990,6 +1020,9 @@ impl SettingsView {
             Slot::SpotifyConnect => self.spotify_connect_row(cx),
             Slot::SpotifyConnectName => self.spotify_connect_name_row(cx),
             Slot::SpotifyConnectCustom => self.spotify_connect_custom_row(),
+            Slot::SessionsButton => self.sessions_button_row(cx),
+            Slot::SessionsOfficial => self.sessions_official_row(cx),
+            Slot::SessionsServer => self.sessions_server_row(cx),
             Slot::Discord => self.discord_row(cx),
             Slot::DiscordName => self.discord_name_row(cx),
             Slot::DiscordShowPaused => self.discord_show_paused_row(cx),
@@ -1040,6 +1073,7 @@ impl SettingsView {
             group_heading(label.clone(), icon, cx)
                 .id(SharedString::from(format!("settings-group-{key}")))
                 .role(Role::Heading)
+                .aria_level(2)
                 .aria_label(label)
         });
         let carded = cards.is_some();
@@ -1171,13 +1205,17 @@ impl SettingsView {
         let theme = *cx.theme();
         let hits = self.found(cx);
         if hits.is_empty() {
+            let empty = t!("search-no-matches");
             return div().child(
-                Vacancy::new(t!("search-no-matches"))
-                    .icon("icons/search.svg")
-                    .py_6(),
+                div()
+                    .id("settings-results-empty")
+                    .role(Role::Label)
+                    .aria_value(empty.clone())
+                    .child(Vacancy::new(empty).icon("icons/search.svg").py_6()),
             );
         }
         let row = snapped(theme.metrics.list_row, window);
+        let count = hits.len();
 
         // the cards pad their art in from their own edge, so the list reaches out by as much to
         // put the art in line with the column
@@ -1187,7 +1225,7 @@ impl SettingsView {
                     .rows(hits.iter().map(|_| row))
                     .draw(cx.processor(move |this: &mut Self, index: usize, _, cx| {
                         match hits.get(index) {
-                            Some((page, slot)) => this.result(index, *page, *slot, cx),
+                            Some((page, slot)) => this.result((index, count), *page, *slot, cx),
                             None => div().into_any_element(),
                         }
                     })),
@@ -1195,10 +1233,11 @@ impl SettingsView {
         )
     }
 
-    /// One search result: the setting's name over the page it lives on.
+    /// One search result, placed by its rank and the number of results: the setting's name over
+    /// the page it lives on.
     fn result(
         &self,
-        index: usize,
+        (index, count): (usize, usize),
         page: SettingsPage,
         slot: Slot,
         cx: &mut Context<Self>,
@@ -1217,11 +1256,17 @@ impl SettingsView {
             None => i18n::lookup(tab.key(), None),
         };
 
-        Card::new(("settings-result", index), title)
-            .fallback(tab.icon())
-            .meta(place)
-            .press(cx.listener(move |this, _, _, cx| this.open_result(page, slot, cx)))
-            .into_any_element()
+        Card::new(
+            SharedString::from(format!("settings-result-{}-{title}", page.id())),
+            title,
+        )
+        .aria_description(place.clone())
+        .aria_position_in_set(index + 1)
+        .aria_size_of_set(count)
+        .fallback(tab.icon())
+        .meta(place)
+        .press(cx.listener(move |this, _, _, cx| this.open_result(page, slot, cx)))
+        .into_any_element()
     }
 
     /// Opens the page a result lives on and scrolls its setting into view.

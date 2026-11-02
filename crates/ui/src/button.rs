@@ -18,6 +18,9 @@ const FADED: f32 = 0.55;
 /// laying a themed slab over it.
 const TINT_HOVER: f32 = 0.14;
 const TINT_ACTIVE: f32 = 0.24;
+/// The status dot's diameter and its distance from the top left corner, as parts of the pad.
+const STATUS: f32 = 0.75;
+const STATUS_INSET: f32 = 0.4;
 /// How far a small button's label sits from its edge, which text set beside one lines up with.
 pub const SMALL_INSET: Pixels = px(8.);
 
@@ -35,6 +38,8 @@ enum Variant {
 pub struct Button {
     base: Stateful<Div>,
     label: Option<SharedString>,
+    /// What a screen reader calls the button when that differs from the visible label.
+    name: Option<SharedString>,
     icon: Option<SharedString>,
     content: Option<AnyElement>,
     /// A small element drawn after the icon and before the label, as a picker's curve sketch.
@@ -45,7 +50,16 @@ pub struct Button {
     small: bool,
     disabled: bool,
     selected: bool,
+    /// Whether the menu or panel the button opens is showing, `None` for a button that opens
+    /// nothing.
+    expanded: Option<bool>,
+    /// Whether a button that flips a setting is on, `None` for one that does not.
+    toggled: Option<bool>,
+    /// Whether the button stands for one tab of a tab list.
+    tab: bool,
     indicator: bool,
+    /// The colour of the status dot over the icon's top left corner, `None` for no dot.
+    status: Option<Hsla>,
     backgroundless: bool,
     hoverless: bool,
     frosted: bool,
@@ -64,6 +78,7 @@ impl Button {
         Self {
             base: div().id(id),
             label: None,
+            name: None,
             icon: None,
             content: None,
             leading: None,
@@ -73,7 +88,11 @@ impl Button {
             small: false,
             disabled: false,
             selected: false,
+            expanded: None,
+            toggled: None,
+            tab: false,
             indicator: false,
+            status: None,
             backgroundless: false,
             hoverless: false,
             frosted: false,
@@ -89,6 +108,13 @@ impl Button {
 
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Names the button for screen readers in place of its label, which is then read after the
+    /// name. A picker passes the setting it changes, so the current choice is not its only name.
+    pub fn name(mut self, name: impl Into<SharedString>) -> Self {
+        self.name = Some(name.into());
         self
     }
 
@@ -177,9 +203,36 @@ impl Button {
         self
     }
 
+    /// Tells screen readers whether the menu or panel this button opens is showing.
+    pub fn expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
+        self
+    }
+
+    /// Announces the button as a toggle that is on or off, for one that flips a setting such as
+    /// shuffle. It changes nothing on screen.
+    pub fn toggled(mut self, toggled: bool) -> Self {
+        self.toggled = Some(toggled);
+        self
+    }
+
+    /// Announces the button as a tab of the tab list around it, read as chosen while `selected`
+    /// is set. It changes nothing on screen.
+    pub fn tab(mut self) -> Self {
+        self.tab = true;
+        self
+    }
+
     /// Paints an active-state dot below the icon without changing the button's layout or hit area.
     pub fn indicator(mut self, indicator: bool) -> Self {
         self.indicator = indicator;
+        self
+    }
+
+    /// Paints a dot of `color` over the top left corner of the icon, marking something under way,
+    /// without changing the button's layout or hit area.
+    pub fn status(mut self, color: Hsla) -> Self {
+        self.status = Some(color);
         self
     }
 
@@ -264,6 +317,7 @@ impl RenderOnce for Button {
         let Self {
             mut base,
             label,
+            name,
             icon,
             content,
             leading,
@@ -273,7 +327,11 @@ impl RenderOnce for Button {
             small,
             disabled,
             selected,
+            expanded,
+            toggled,
+            tab,
             indicator,
+            status,
             backgroundless,
             hoverless,
             frosted,
@@ -379,18 +437,33 @@ impl RenderOnce for Button {
         // A nameless button still takes a role, so it lands in the tree with
         // nothing to announce. Fail loudly in dev instead of going silent.
         debug_assert!(
-            label.is_some() || tooltip.is_some(),
+            label.is_some() || name.is_some() || tooltip.is_some(),
             "button without label or tooltip is invisible to screen readers"
         );
-        let accessible = label
-            .clone()
-            .or_else(|| tooltip.as_ref().map(|(key, _)| i18n::lookup(key, None)));
+        let (accessible, description) = match name {
+            Some(name) => (Some(name), label.clone().or_else(|| detail.clone())),
+            None => (
+                label
+                    .clone()
+                    .or_else(|| tooltip.as_ref().map(|(key, _)| i18n::lookup(key, None))),
+                detail.clone(),
+            ),
+        };
 
         let mut button = base
-            .role(gpui::accesskit::Role::Button)
+            .role(match tab {
+                true => gpui::accesskit::Role::Tab,
+                false => gpui::accesskit::Role::Button,
+            })
             .when_some(accessible, |this, name| this.aria_label(name))
-            .when_some(detail.clone(), |this, detail| this.aria_description(detail))
-            .when(selected, |this| this.aria_selected(true))
+            .when_some(description, |this, description| {
+                this.aria_description(description)
+            })
+            .when(selected || tab, |this| this.aria_selected(selected))
+            .when_some(expanded, |this, expanded| this.aria_expanded(expanded))
+            .when_some(toggled, |this, toggled| {
+                this.aria_toggled(gpui::accesskit::Toggled::from(toggled))
+            })
             .flex()
             .flex_none()
             .items_center()
@@ -466,6 +539,18 @@ impl RenderOnce for Button {
                         .size(diameter)
                         .rounded_full()
                         .bg(foreground),
+                )
+            })
+            .when_some(status, |this, color| {
+                let diameter = theme.metrics.pad * STATUS;
+                this.relative().child(
+                    div()
+                        .absolute()
+                        .top(theme.metrics.pad * STATUS_INSET)
+                        .left(theme.metrics.pad * STATUS_INSET)
+                        .size(diameter)
+                        .rounded_full()
+                        .bg(color),
                 )
             })
             .when(interactive, |this| {

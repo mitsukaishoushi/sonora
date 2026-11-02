@@ -104,6 +104,7 @@ menu-add-tracks-to-playlist = { $count ->
    *[other] Добавить { $count } треков в плейлист
 }
 menu-new-playlist = Новый плейлист
+menu-import-playlist = Импортировать плейлист…
 menu-edit-tags = Изменить теги
 menu-no-playlists = Нет плейлистов
 menu-search-playlists = Поиск плейлиста
@@ -164,8 +165,11 @@ menu-play-tracks-last = { $count ->
     [few] Воспроизвести { $count } трека в конце
    *[other] Воспроизвести { $count } треков в конце
 }
-menu-song-radio = Радио по треку
-menu-go-to-album = Перейти к альбому
+menu-go-to = Перейти
+menu-artist = Исполнитель
+menu-album = Альбом
+menu-radio = Радио
+menu-details = Подробнее
 menu-go-to-artist = Перейти к исполнителю
 menu-view-details = Подробнее
 menu-copy-link = Копировать ссылку
@@ -174,8 +178,9 @@ menu-copy = Копировать
 menu-paste = Вставить
 menu-select-all = Выделить всё
 menu-remove-from-queue = Убрать из очереди
-menu-rename-playlist = Переименовать плейлист
+menu-edit-playlist = Редактировать плейлист
 menu-delete-playlist = Удалить плейлист
+menu-export-playlist = Экспортировать плейлист…
 menu-add-playlist-to-library = Добавить в медиатеку
 menu-remove-playlist-from-library = Удалить из медиатеки
 menu-library-add = Добавить в медиатеку
@@ -197,7 +202,12 @@ menu-play-artist = Воспроизвести исполнителя
 # playlist editor
 playlist-name-placeholder = Название плейлиста
 playlist-create-title = Создать плейлист
-playlist-rename-title = Переименовать плейлист
+playlist-edit-title = Редактировать плейлист
+playlist-cover-choose = Выбрать картинку
+playlist-cover-remove = Убрать обложку
+playlist-cover-unopenable = Sonora не может открыть этот файл
+playlist-cover-too-large = Картинка больше 40 МБ
+playlist-cover-not-a-picture = Это не картинка в JPEG, PNG или WebP
 playlist-delete-title = Удалить плейлист
 playlist-delete-confirm = Удалить «{ $name }»? Это действие нельзя отменить.
 playlist-again-title = Добавить ещё раз?
@@ -270,10 +280,7 @@ player-previous = Предыдущий трек
 player-next = Следующий трек
 player-fullscreen = Полноэкранный режим
 player-fullscreen-leave = Выйти из полноэкранного режима
-player-devices = Устройства
 devices-this-computer = Этот компьютер
-devices-pause = Пауза
-devices-resume = Продолжить
 devices-jam-join = Присоединиться к Jam…
 devices-jam-join-title = Присоединиться к Jam
 devices-jam-join-detail = Вставьте ссылку, которой поделился друг
@@ -281,15 +288,12 @@ devices-jam-paste = Вставить
 devices-jam-link-hint = Ссылка на Jam
 devices-jam-start = Начать Jam
 devices-jam-copy = Копировать ссылку на Jam
-devices-jam-code = QR-код
 devices-jam-code-menu = Показать QR-код
 devices-jam-code-title = Отсканируйте, чтобы присоединиться к Jam { $host }
 devices-jam-code-title-anonymous = Отсканируйте, чтобы присоединиться к Jam
 devices-jam-code-close = Закрыть
 devices-jam-leave = Покинуть Jam
 devices-jam-end = Завершить Jam
-devices-jam-banner = В Jam { $host }
-devices-jam-banner-anonymous = В Jam
 devices-jam-more = +{ $count }
 devices-jam-host = Организатор
 devices-jam-you = Вы
@@ -302,8 +306,29 @@ devices-jam-invite-detail = { $count ->
    *[other] В этом Jam уже { $count } человек.
 }
 devices-jam-invite-join = Присоединиться
-devices-elsewhere-banner = Играет на { $device }
-devices-elsewhere-here = Играть здесь
+player-sessions = Сессии
+devices-spotify-jams = Spotify Jams
+members-title = Участники
+members-empty = Начните сессию или присоединитесь к ней, чтобы увидеть, кто слушает вместе с вами
+devices-session-start = Начать сессию
+devices-session-join = Присоединиться к сессии…
+devices-session-join-title = Присоединиться к сессии
+devices-session-join-detail = Введите код, которым с вами поделились
+devices-session-join-confirm = Присоединиться
+devices-session-code = Код сессии
+devices-session-code-menu = Показать код сессии
+devices-session-code-title = Код вашей сессии
+devices-session-code-detail = Присоединиться по этому коду может любой, кто вошёл в { $provider }
+devices-session-code-close = Готово
+devices-session-copy = Скопировать код
+devices-session-leave = Покинуть сессию
+devices-session-end = Завершить сессию
+devices-session-reconnecting = Переподключение…
+devices-session-people = { $count ->
+    [one] { $count } человек в этой сессии
+    [few] { $count } человека в этой сессии
+   *[many] { $count } человек в этой сессии
+    }
 fullscreen-artwork = Обложка
 
 # filters
@@ -446,6 +471,7 @@ release-meta = { $year } • { $kind }
 home-quick-picks = Быстрый выбор
 home-quick-picks-empty = Добавьте несколько треков, и они появятся здесь
 home-recently-added = Недавно добавленные
+home-recently-played = Недавно прослушанные
 home-playlists = Плейлисты
 home-favorite-albums = Избранные альбомы
 home-artists = Исполнители
@@ -454,6 +480,9 @@ home-collection-albums = Альбомы из вашей коллекции
 # search page
 search-placeholder = Что хотите послушать?
 search-browse = Всё подряд
+search-submit = Найти
+search-recent = Недавние запросы
+search-forget = Удалить из истории
 genre-empty = Здесь пока пусто
 search-best-match = Лучшее совпадение
 search-no-matches = Ничего не найдено
@@ -734,6 +763,7 @@ settings-discord-hide-on-connect-detail = Оставлять статус сам
 settings-discord-buttons = Кнопки
 settings-discord-buttons-detail = Ссылки под статусом, которые могут открыть ваши друзья: одна на трек в его сервисе, другая на Sonora
 settings-discord-buttons-pick = Выбрать кнопки
+settings-discord-preview = Предпросмотр статуса Discord
 settings-discord-preview-listening = Слушает { $name }
 settings-discord-preview-music = Музыка
 settings-discord-preview-elapsed = Прошло { $time }
@@ -1008,7 +1038,6 @@ settings-romanized-lyrics = Романизация текста
 settings-romanized-lyrics-detail = Показывать локально собранное произношение для выбранных систем письма
 settings-romanization-writing-systems = Системы письма
 settings-lyrics-priority = Приоритет источников
-settings-lyrics-priority-detail = Из текстов одного вида Sonora показывает тот, чей источник стоит выше
 settings-lyrics-providers-detail = Выберите сервисы для поиска текстов песен
 settings-lyrics-providers-selected = { $count ->
     [one] Выбран { $count } источник
@@ -1036,6 +1065,12 @@ settings-group-text = Текст
 settings-group-motion = Анимация
 settings-group-streaming = Стриминг
 settings-group-spotify-connect = Spotify Connect
+settings-group-sessions = Сессии
+settings-sessions-button = Показывать кнопку сессий
+settings-sessions-official = Использовать официальный сервер Sonora Sessions
+settings-sessions-server = Адрес сервера
+settings-sessions-server-hint = wss://sessions.example.com
+settings-sessions-save = Сохранить
 settings-adaptive-menu = Адаптивное контекстное меню
 settings-adaptive-menu-detail = Убирает пункты, которые уже видны в строке, — например альбом или исполнителя
 settings-accounts = Управление аккаунтами
@@ -1110,6 +1145,9 @@ saver-fps = { $fps } FPS
 
 toast-playlist-created = Плейлист создан
 toast-playlist-renamed = Плейлист переименован
+toast-playlist-updated = Плейлист обновлён
+toast-playlist-cover-changed = Обложка плейлиста изменена
+toast-playlist-cover-removed = Обложка плейлиста убрана
 toast-playlist-deleted = Плейлист удалён
 toast-local-delete-failed = Не удалось удалить часть файлов треков
 toast-playlist-added = Плейлист добавлен в медиатеку
@@ -1121,6 +1159,14 @@ toast-track-removed-unnamed = Удалено из плейлиста
 toast-playlist-failed = Не удалось сохранить изменение
 toast-playlist-busy = Другое изменение ещё выполняется
 toast-playlist-signed-out = Войдите, чтобы менять плейлисты
+toast-playlist-imported = Плейлист { $name } импортирован
+toast-playlist-imported-partly = Плейлист { $name } импортирован без { $count ->
+        [one] { $count } трека, которого
+       *[other] { $count } треков, которых
+    } нет в медиатеке
+toast-playlist-import-empty = Ни одного трека из { $name } нет в медиатеке
+toast-playlist-exported = Плейлист экспортирован
+toast-file-dialog-failed = Не удалось открыть окно выбора файла
 toast-queued-track = { $name } добавлен в очередь
 toast-next-track = { $name } прозвучит следующим
 toast-last-track = { $name } прозвучит в конце
@@ -1300,6 +1346,23 @@ toast-jam-failed = Не удалось начать Jam или присоеди�
 toast-jam-ended = Jam завершён
 toast-jam-left = Вы покинули Jam
 toast-jam-leave-failed = Не удалось завершить или покинуть Jam.
+toast-session-needs-provider = Войдите в стриминговый сервис, чтобы начать сессию.
+toast-session-not-found = Сессии с таким кодом нет.
+toast-session-provider = Эта сессия играет из { $name }. Войдите в { $name }, чтобы присоединиться.
+toast-session-full = В этой сессии нет мест.
+toast-session-rate-limited = Слишком много неверных кодов. Попробуйте через несколько минут.
+toast-session-too-many = Из вашей сети уже запущено максимальное число сессий. Завершите одну, чтобы начать новую.
+toast-session-unreachable = Не удалось связаться с Sonora Session. Попробуйте позже.
+toast-session-failed = Не удалось начать сессию или присоединиться к ней.
+toast-session-lost = Связь с сессией потеряна
+toast-session-ended = Сессия завершена
+toast-session-left = Вы покинули сессию
+toast-session-kicked = Хост удалил вас из сессии
+toast-session-code-copied = Код скопирован
+toast-sessions-server-saved = Сервер сессий сохранён
+toast-sessions-server-empty = Сначала введите адрес вашего сервера
+toast-sessions-server-malformed = Это не похоже на адрес сервера
+toast-sessions-server-silent = По этому адресу не отвечает сервер Sonora Sessions, поэтому он не сохранён
 nav-nothing-pinned = Здесь пусто
 nav-pins-alphabetical = По алфавиту
 nav-pins-kind = По типу
@@ -1317,20 +1380,6 @@ toast-offline-mode = Вы офлайн. Перейдите в онлайн, чт
 offline-title = Вы офлайн.
 offline-go-online = Перейти в онлайн
 toast-download-failed = Не удалось получить список треков для скачивания.
-toast-downloading = Скачивание { $name }
-toast-downloading-songs = { $count ->
-    [one] Скачивание { $count } трека
-   *[other] Скачивание { $count } треков
-}
-toast-downloaded = Скачано: { $name }
-toast-downloaded-songs = { $count ->
-    [one] Скачан { $count } трек
-    [few] Скачано { $count } трека
-   *[other] Скачано { $count } треков
-}
-toast-download-set-failed = Не удалось скачать часть треков из { $name }
-toast-download-song-failed = Не удалось скачать { $name }
-toast-download-songs-failed = Не удалось скачать часть треков
 toast-percent = { $percent }%
 toast-download-cancelled = Отменено скачивание { $name }
 toast-downloads-cancelled = { $count ->

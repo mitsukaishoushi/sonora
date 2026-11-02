@@ -104,6 +104,7 @@ menu-add-tracks-to-playlist = { $count ->
    *[other] Додати { $count } треків до плейлиста
 }
 menu-new-playlist = Новий плейлист
+menu-import-playlist = Імпортувати плейлист…
 menu-edit-tags = Змінити теги
 menu-no-playlists = Немає плейлистів
 menu-search-playlists = Пошук плейлиста
@@ -164,8 +165,11 @@ menu-play-tracks-last = { $count ->
     [few] Відтворити { $count } треки наприкінці
    *[other] Відтворити { $count } треків наприкінці
 }
-menu-song-radio = Радіо за треком
-menu-go-to-album = Перейти до альбому
+menu-go-to = Перейти
+menu-artist = Виконавець
+menu-album = Альбом
+menu-radio = Радіо
+menu-details = Докладніше
 menu-go-to-artist = Перейти до виконавця
 menu-view-details = Докладніше
 menu-copy-link = Копіювати посилання
@@ -174,8 +178,9 @@ menu-copy = Скопіювати
 menu-paste = Вставити
 menu-select-all = Вибрати все
 menu-remove-from-queue = Вилучити з черги
-menu-rename-playlist = Перейменувати плейлист
+menu-edit-playlist = Редагувати плейлист
 menu-delete-playlist = Видалити плейлист
+menu-export-playlist = Експортувати плейлист…
 menu-add-playlist-to-library = Додати до медіатеки
 menu-remove-playlist-from-library = Вилучити з медіатеки
 menu-library-add = Додати до медіатеки
@@ -197,7 +202,12 @@ menu-play-artist = Відтворити виконавця
 # playlist editor
 playlist-name-placeholder = Назва плейлиста
 playlist-create-title = Створити плейлист
-playlist-rename-title = Перейменувати плейлист
+playlist-edit-title = Редагувати плейлист
+playlist-cover-choose = Вибрати зображення
+playlist-cover-remove = Прибрати обкладинку
+playlist-cover-unopenable = Sonora не може відкрити цей файл
+playlist-cover-too-large = Зображення більше за 40 МБ
+playlist-cover-not-a-picture = Це не зображення JPEG, PNG чи WebP
 playlist-delete-title = Видалити плейлист
 playlist-delete-confirm = Видалити «{ $name }»? Цю дію неможливо скасувати.
 playlist-again-title = Додати ще раз?
@@ -270,10 +280,7 @@ player-previous = Попередній трек
 player-next = Наступний трек
 player-fullscreen = Повноекранний режим
 player-fullscreen-leave = Вийти з повноекранного режиму
-player-devices = Пристрої
 devices-this-computer = Цей комп'ютер
-devices-pause = Пауза
-devices-resume = Продовжити
 devices-jam-join = Приєднатися до Jam…
 devices-jam-join-title = Приєднатися до Jam
 devices-jam-join-detail = Вставте посилання, яким поділився друг
@@ -281,15 +288,12 @@ devices-jam-paste = Вставити
 devices-jam-link-hint = Посилання на Jam
 devices-jam-start = Почати Jam
 devices-jam-copy = Копіювати посилання на Jam
-devices-jam-code = QR-код
 devices-jam-code-menu = Показати QR-код
 devices-jam-code-title = Скануйте, щоб приєднатися до Jam користувача { $host }
 devices-jam-code-title-anonymous = Скануйте, щоб приєднатися до Jam
 devices-jam-code-close = Закрити
 devices-jam-leave = Вийти з Jam
 devices-jam-end = Завершити Jam
-devices-jam-banner = У Jam користувача { $host }
-devices-jam-banner-anonymous = У Jam
 devices-jam-more = +{ $count }
 devices-jam-host = Організатор
 devices-jam-you = Ви
@@ -302,8 +306,6 @@ devices-jam-invite-detail = { $count ->
    *[other] У цьому Jam уже { $count } учасників.
 }
 devices-jam-invite-join = Приєднатися
-devices-elsewhere-banner = Грає на { $device }
-devices-elsewhere-here = Слухати тут
 fullscreen-artwork = Обкладинка
 
 # filters
@@ -446,6 +448,7 @@ release-meta = { $year } • { $kind }
 home-quick-picks = Швидкий вибір
 home-quick-picks-empty = Додайте кілька треків, і вони з'являться тут
 home-recently-added = Нещодавно додане
+home-recently-played = Нещодавно прослухане
 home-playlists = Плейлисти
 home-favorite-albums = Улюблені альбоми
 home-artists = Виконавці
@@ -454,6 +457,9 @@ home-collection-albums = Альбоми з вашої колекції
 # search page
 search-placeholder = Що хочете послухати?
 search-browse = Огляд
+search-submit = Знайти
+search-recent = Нещодавні запити
+search-forget = Видалити з історії
 genre-empty = Тут поки що порожньо
 search-best-match = Найкращий збіг
 search-no-matches = Нічого не знайдено
@@ -734,6 +740,7 @@ settings-discord-hide-on-connect-detail = Залишає статус самом
 settings-discord-buttons = Кнопки
 settings-discord-buttons-detail = Посилання під статусом, які можуть відкрити друзі: на трек у його сервісі й на Sonora
 settings-discord-buttons-pick = Обрати кнопки
+settings-discord-preview = Попередній перегляд статусу Discord
 settings-discord-preview-listening = Слухає { $name }
 settings-discord-preview-music = Музика
 settings-discord-preview-elapsed = Минуло { $time }
@@ -1007,7 +1014,6 @@ settings-romanized-lyrics = Романізація тексту
 settings-romanized-lyrics-detail = Показувати локально зібрану вимову для вибраних систем письма
 settings-romanization-writing-systems = Системи письма
 settings-lyrics-priority = Пріоритет джерел
-settings-lyrics-priority-detail = Серед текстів одного типу Sonora показує те джерело, що вище в списку
 settings-lyrics-providers-detail = Виберіть сервіси для пошуку текстів пісень
 settings-lyrics-providers-selected = { $count ->
     [one] Вибрано { $count } джерело
@@ -1109,6 +1115,9 @@ saver-fps = { $fps } FPS
 
 toast-playlist-created = Плейлист створено
 toast-playlist-renamed = Плейлист перейменовано
+toast-playlist-updated = Плейлист оновлено
+toast-playlist-cover-changed = Обкладинку плейлиста змінено
+toast-playlist-cover-removed = Обкладинку плейлиста прибрано
 toast-playlist-deleted = Плейлист видалено
 toast-local-delete-failed = Не вдалося видалити деякі файли треків
 toast-playlist-added = Плейлист додано до медіатеки
@@ -1120,6 +1129,14 @@ toast-track-removed-unnamed = Вилучено з плейлиста
 toast-playlist-failed = Не вдалося зберегти зміну
 toast-playlist-busy = Інша зміна ще виконується
 toast-playlist-signed-out = Увійдіть, щоб змінювати плейлисти
+toast-playlist-imported = Плейлист { $name } імпортовано
+toast-playlist-imported-partly = Плейлист { $name } імпортовано без { $count ->
+        [one] { $count } трека, якого
+       *[other] { $count } треків, яких
+    } немає в медіатеці
+toast-playlist-import-empty = Жодного треку з { $name } немає в медіатеці
+toast-playlist-exported = Плейлист експортовано
+toast-file-dialog-failed = Не вдалося відкрити вікно вибору файлу
 toast-queued-track = { $name } додано до черги
 toast-next-track = { $name } прозвучить наступним
 toast-last-track = { $name } прозвучить наприкінці
@@ -1296,21 +1313,6 @@ toast-offline-mode = Ви офлайн. Перейдіть в онлайн, що
 offline-title = Ви офлайн.
 offline-go-online = Перейти в онлайн
 toast-download-failed = Не вдалося отримати список треків для завантаження.
-toast-downloading = Завантажуємо { $name }
-toast-downloading-songs = { $count ->
-    [one] Завантажуємо { $count } трек
-    [few] Завантажуємо { $count } треки
-   *[other] Завантажуємо { $count } треків
-}
-toast-downloaded = { $name } завантажено
-toast-downloaded-songs = { $count ->
-    [one] Завантажено { $count } трек
-    [few] Завантажено { $count } треки
-   *[other] Завантажено { $count } треків
-}
-toast-download-set-failed = Не вдалося завантажити деякі треки з { $name }
-toast-download-song-failed = Не вдалося завантажити { $name }
-toast-download-songs-failed = Не вдалося завантажити деякі треки
 toast-percent = { $percent }%
 toast-download-cancelled = Завантаження { $name } скасовано
 toast-downloads-cancelled = { $count ->

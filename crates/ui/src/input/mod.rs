@@ -240,6 +240,8 @@ fn offset_to_utf16(text: &str, offset: usize) -> usize {
 pub struct Input {
     focus_handle: FocusHandle,
     hint: SharedString,
+    /// The Fluent key of what a screen reader calls the field, when that differs from its hint.
+    name: Option<SharedString>,
     icon: Option<SharedString>,
     compact: bool,
     tucked: bool,
@@ -248,6 +250,9 @@ pub struct Input {
     masked: bool,
     /// Whether the text keeps to the field's end rather than its start, as a column of numbers.
     end: bool,
+    /// Whether the field holds something that was turned down, which its border shows in the
+    /// danger colour until it is cleared.
+    invalid: bool,
     /// The Fluent key of the muted unit drawn after the text inside the field.
     suffix: Option<SharedString>,
     /// The keystroke that focuses the field, drawn as keys at its end while it is empty.
@@ -258,6 +263,9 @@ pub struct Input {
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
+    /// How far the text is scrolled left under the field, so the caret stays in sight when the
+    /// text is wider than the field.
+    scroll: Pixels,
     selecting: bool,
     selected_word: Option<Range<usize>>,
     context_menu: Option<Point<Pixels>>,
@@ -268,6 +276,7 @@ impl Input {
         Self {
             focus_handle: cx.focus_handle(),
             hint: hint.into(),
+            name: None,
             icon: None,
             compact: false,
             tucked: false,
@@ -275,6 +284,7 @@ impl Input {
             clearable: false,
             masked: false,
             end: false,
+            invalid: false,
             suffix: None,
             shortcut: None,
             content: SharedString::default(),
@@ -283,6 +293,7 @@ impl Input {
             marked_range: None,
             last_layout: None,
             last_bounds: None,
+            scroll: Pixels::ZERO,
             selecting: false,
             selected_word: None,
             context_menu: None,
@@ -323,6 +334,13 @@ impl Input {
         self
     }
 
+    /// Names the field for screen readers with the Fluent message `key`, for a field whose hint is
+    /// an example rather than what it asks for. The hint is then read as the placeholder.
+    pub fn name(mut self, key: impl Into<SharedString>) -> Self {
+        self.name = Some(key.into());
+        self
+    }
+
     /// Keeps the text against the field's end, so numbers in fields stacked or set side by side
     /// line up by their last digit. Text too long for the field starts at its start as usual.
     pub fn align_end(mut self) -> Self {
@@ -358,6 +376,14 @@ impl Input {
     pub fn set_hint(&mut self, hint: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.hint = hint.into();
         cx.notify();
+    }
+
+    /// Marks the field as holding something that was turned down, or clears the mark.
+    pub fn set_invalid(&mut self, invalid: bool, cx: &mut Context<Self>) {
+        if self.invalid != invalid {
+            self.invalid = invalid;
+            cx.notify();
+        }
     }
 
     /// Draws the content as dots, or stops. Offsets stay content offsets either way, so the
@@ -880,7 +906,7 @@ impl EntityInputHandler for Input {
         Some(span(
             line,
             at(range.start)..at(range.end),
-            bounds.left(),
+            bounds.left() - self.scroll,
             bounds,
         ))
     }
