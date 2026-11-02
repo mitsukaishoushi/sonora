@@ -14,6 +14,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Center the compact player's seek bar vertically between the song details and playback buttons at every player size.
 - Give the compact player's seek bar more breathing room below track details while keeping the playback controls aligned.
 - Keep the compact player's previous, play/pause, and next controls centered after removing the microphone button.
 - Keep the mini player's artwork square and edge-to-edge after choosing a position or cover size on Windows.

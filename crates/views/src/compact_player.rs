@@ -353,12 +353,12 @@ impl Render for CompactPlayer {
                 .child(previous_button).child(playback_button).child(next_button))
             .child(div().flex().flex_1().min_w_0().items_center().justify_end().child(queue_button));
 
-        // Keep seeking and transport together, leaving the breathing room below track details.
-        let transport = div().flex().flex_col().flex_none().child(timeline).child(controls);
-        let player = div().flex().flex_col().justify_between().p(pad).flex_none()
+        // Center seeking in the space left between the fixed header and controls.
+        let seeking = div().flex().flex_col().flex_1().min_h_0().justify_center().child(timeline);
+        let player = div().flex().flex_col().p(pad).flex_none()
             .h((self.drawer.base.size.height - PIXEL * 2.).max(PIXEL)).w_full()
             .on_scroll_wheel(cx.listener(Self::turn_volume))
-            .child(header).child(transport).into_any_element();
+            .child(header).child(seeking).child(controls).into_any_element();
         let drawer = self.queue_panel(queue_mix, window, cx);
         let contents = match self.drawer.above {
             true => vec![drawer, player],
