@@ -353,8 +353,9 @@ impl Render for CompactPlayer {
                 .child(previous_button).child(playback_button).child(next_button))
             .child(div().flex().flex_1().min_w_0().items_center().justify_end().child(queue_button));
 
-        // Center seeking in the space left between the fixed header and controls.
-        let seeking = div().flex().flex_col().flex_1().min_h_0().justify_center().child(timeline);
+        // Give the artwork breathing room while balancing seeking above the control glyphs.
+        let seeking = div().flex().flex_col().flex_1().min_h_0()
+            .pt(theme.metrics.pad * scale).justify_center().child(timeline);
         let player = div().flex().flex_col().p(pad).flex_none()
             .h((self.drawer.base.size.height - PIXEL * 2.).max(PIXEL)).w_full()
             .on_scroll_wheel(cx.listener(Self::turn_volume))
