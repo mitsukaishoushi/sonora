@@ -44,7 +44,6 @@ nav-pinned = Pinned
 nav-unpin = Unpin
 nav-pin-hint = Drop here to pin
 library-liked-songs = Favorites
-library-play-liked-songs = Play
 library-no-songs = No favorites yet
 library-no-albums = No saved albums yet
 library-no-playlists = No playlists yet
@@ -125,16 +124,9 @@ menu-import-playlist = Import playlist…
 menu-edit-tags = Edit tags
 menu-no-playlists = No playlists
 menu-search-playlists = Search a playlist
+menu-save-library = Library
 menu-add-to-library = Add to Favorites
-menu-add-tracks-to-library = { $count ->
-    [one] Add { $count } track to Favorites
-   *[other] Add { $count } tracks to Favorites
-}
 menu-remove-from-library = Remove from Favorites
-menu-remove-tracks-from-library = { $count ->
-    [one] Remove { $count } track from Favorites
-   *[other] Remove { $count } tracks from Favorites
-}
 menu-remove-from-playlist = Remove from playlist
 menu-remove-tracks-from-playlist = { $count ->
     [one] Remove { $count } track from playlist
@@ -148,15 +140,7 @@ menu-remove-tracks-from-history = { $count ->
 menu-delete-track-file = Delete track file
 menu-delete-track-files = Delete { $count } track files
 menu-download = Download
-menu-download-tracks = { $count ->
-    [one] Download { $count } track
-   *[other] Download { $count } tracks
-}
 menu-remove-download = Remove download
-menu-remove-downloads = { $count ->
-    [one] Remove { $count } download
-   *[other] Remove { $count } downloads
-}
 menu-downloading = Downloading. Click to stop
 menu-play-next = Play next
 menu-play-tracks-next = { $count ->
@@ -173,11 +157,8 @@ menu-play-tracks-last = { $count ->
     [one] Play { $count } track last
    *[other] Play { $count } tracks last
 }
-menu-go-to = Go to
-menu-artist = Artist
-menu-album = Album
-menu-radio = Radio
-menu-details = Details
+menu-song-radio = Go to song radio
+menu-go-to-album = Go to album
 menu-go-to-artist = Go to artist
 menu-view-details = View details
 menu-copy-link = Copy link
@@ -191,16 +172,6 @@ menu-delete-playlist = Delete playlist
 menu-export-playlist = Export playlist…
 menu-add-playlist-to-library = Add to Library
 menu-remove-playlist-from-library = Remove from Library
-menu-library-add = Add to Library
-menu-library-add-tracks = { $count ->
-    [one] Add { $count } track to Library
-   *[other] Add { $count } tracks to Library
-}
-menu-library-remove = Remove from Library
-menu-library-remove-tracks = { $count ->
-    [one] Remove { $count } track from Library
-   *[other] Remove { $count } tracks from Library
-}
 menu-make-playlist-public = Make public
 menu-make-playlist-private = Make private
 menu-play-artist = Play artist
@@ -373,6 +344,8 @@ login-problem-network = Sonora could not reach the music service. Check your int
 login-problem-cancelled = The sign-in was not approved in the browser, or ran out of time. Start again to finish.
 login-problem-refused = Spotify turned down the sign-in. Wait a moment and try again.
 login-problem-premium = Sonora streams through Spotify Premium, and this account does not have it. Sign in with a Premium account to continue.
+login-problem-subscription = No active subscription on this Apple ID.
+login-subscription-check = Check Apple Music
 login-sign-in = Sign in with { $provider }
 login-connect-cookies = Paste cookies manually
 login-cookie-open = Open { $provider }
@@ -414,8 +387,6 @@ login-providers = Music services
 
 # album and playlist pages
 detail-playlist = Playlist
-detail-play-album = Play album
-detail-play-playlist = Play playlist
 
 # play button
 play-pause = Pause
@@ -428,12 +399,16 @@ artist-monthly-listeners = { $count ->
     [one] { $value } monthly listener
    *[other] { $value } monthly listeners
 }
-artist-play = Play now
 artist-popular = Popular
 artist-popular-eyebrow = Explore this artist
 artist-popular-empty = Nothing to play from this artist yet
 artist-popular-more = Show all
 artist-popular-less = Show less
+artist-favorite-songs = Your favorite songs
+artist-favorite-songs-count = { $count ->
+    [one] { $count } song in your Favorites
+   *[other] { $count } songs in your Favorites
+}
 artist-releases = Releases
 artist-releases-more = Show all
 artist-releases-less = Show less
@@ -504,7 +479,6 @@ kind-playlist = Playlist
 
 # song page
 song-eyebrow = Song
-song-play = Play song
 song-view-album = View album
 song-loading = Loading song information…
 song-about = About this song
@@ -833,6 +807,9 @@ settings-buffer = Buffer size
 settings-buffer-detail = How much audio Sonora hands the device at a time
 settings-buffer-smaller = Smaller buffer
 settings-buffer-larger = Larger buffer
+settings-match-rate = Match sample rate
+settings-match-rate-detail = Plays each track at its own sample rate
+settings-match-rate-direct-only = Needs a device under Direct to hardware
 settings-output-idle = Not playing
 settings-output-device-loading = Loading devices…
 settings-output-failed = Device not supported
@@ -1033,6 +1010,8 @@ equalizer-status-channels = { $from ->
     [2] stereo
    *[other] { $to } ch
 }
+settings-lyrics = Show lyrics
+settings-lyrics-detail = Turn off to hide lyrics everywhere and stop looking them up
 settings-panel-lyrics-size = Text size in the panel
 settings-panel-lyrics-size-detail = Size of the lyrics text in the side panel, on top of the base font size
 settings-fullscreen-lyrics-size = Text size in Now playing
@@ -1338,6 +1317,8 @@ toast-tags-saved = Saved the tags for { $name }
 toast-tags-failed = The tags could not be saved
 toast-output-select-failed = Unable to select { $name }
 toast-output-default-failed = Unable to select the system default device
+toast-output-direct-failed = Unable to play directly on the device
+toast-output-rate-failed = Unable to switch the device's sample rate
 
 nav-pin = Pin
 toast-library-pin-failed = Could not update the pin.

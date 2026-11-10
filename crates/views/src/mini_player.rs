@@ -367,4 +367,3 @@ fn restore(parent: AnyWindowHandle, cx: &mut App) {
         .update(cx, |_, window, _| window.activate_window())
         .ok();
 }
-

@@ -422,4 +422,3 @@ fn apply(window: &mut Window, bounds: Option<Bounds<Pixels>>, _: Option<bool>, _
 fn restore(parent: AnyWindowHandle, cx: &mut App) {
     parent.update(cx, |_, window, _| window.activate_window()).ok();
 }
-
