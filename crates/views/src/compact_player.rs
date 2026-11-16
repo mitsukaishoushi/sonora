@@ -15,7 +15,7 @@ use gpui::{
 use i18n::t;
 use input::{CloseWindow, ToggleCompactPlayer, ToggleMiniPlayer, WORKSPACE_CONTEXT};
 use state::{AppSettings, Playback, Queue, Sonora};
-use ui::{ActiveTheme as _, Artwork, Button, Dismiss, ExplicitBadge, Scrubber, ScrubberState, Text, clock, tabular};
+use ui::{ActiveTheme as _, Artwork, Badge, Button, Dismiss, Scrubber, ScrubberState, Text, clock, tabular};
 
 #[cfg(target_os = "windows")]
 use crate::mini_player::native;
@@ -285,7 +285,7 @@ impl Render for CompactPlayer {
             .child(div().flex().flex_col().justify_center().flex_1().min_w_0()
                 .child(div().flex().items_center().min_w_0().gap_1()
                     .child(div().min_w_0().truncate().font_weight(FontWeight::SEMIBOLD).child(title))
-                    .when(explicit, |this| this.child(ExplicitBadge::new())))
+                    .when(explicit, |this| this.child(Badge::explicit())))
                 .child(div().min_w_0().truncate().text_size(theme.text(Text::Label))
                     .text_color(theme.popover_foreground.opacity(0.65)).child(detail)));
 
