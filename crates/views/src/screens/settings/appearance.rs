@@ -50,8 +50,7 @@ impl SettingsView {
         )
     }
 
-
-    pub(super) fn appearance_groups(&self) -> Vec<Group> {
+    pub(super) fn appearance_groups(&self, cx: &App) -> Vec<Group> {
         vec![
             Group::new("settings-theme", "icons/palette.svg")
                 .cards(Slot::Theme)
@@ -63,7 +62,7 @@ impl SettingsView {
             Group::new("settings-group-window", "icons/panel-left-open.svg").rows(
                 [Slot::Opacity, Slot::CompactOpacity]
                     .into_iter()
-                    .chain(ui::WINDOW_BLUR.then_some(Slot::WindowBlur))
+                    .chain(ui::WindowBlur::supported(cx).then_some(Slot::WindowBlur))
                     .chain([Slot::Blur]),
             ),
         ]

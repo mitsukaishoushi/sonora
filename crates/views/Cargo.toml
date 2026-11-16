@@ -24,3 +24,6 @@ gpui_platform.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle.workspace = true
 windows.workspace = true
+
+[lints]
+workspace = true
